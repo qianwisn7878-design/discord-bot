@@ -1,7 +1,7 @@
 import {createHmac,randomUUID} from 'node:crypto';
 import {mkdirSync,readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {resolve} from 'node:path';
-export const STATISTICS_GUILDS=new Set(['1554439098490429442','1492461447568162876','1554439352652922891']);
+export const STATISTICS_GUILDS=new Set(['1554439098490429442','1492461447568162876','1554439352652922891','1563217788288499813']);
 export const statisticsDay=t=>new Date(t+32400000).toISOString().slice(0,10);
 export function createStatisticsCollector({secret,send,now=Date.now,directory=resolve('.etg-statistics')}){
  mkdirSync(directory,{recursive:true});const file=resolve(directory,'outbox.json');let queue=[];try{queue=JSON.parse(readFileSync(file,'utf8'));if(!Array.isArray(queue))queue=[];}catch{}const buckets=new Map();let busy=false;const last=new Map();
@@ -11,7 +11,7 @@ export function createStatisticsCollector({secret,send,now=Date.now,directory=re
  const person=(b,id,kind)=>{const h=hash(id);if(!b.users.includes(h))b.users.push(h);if(kind&&!b[kind].includes(h))b[kind].push(h);};
  function activity({guildId,userId,bot=false,kind,channelId,feature}){if(bot||!STATISTICS_GUILDS.has(guildId))return;const b=bucket(guildId);person(b,userId,kind==='message'?'chatUsers':null);if(kind==='message'){b.messages++;b.hours[new Date(now()+32400000).getUTCHours()]++;if(channelId)b.channels[channelId]=(b.channels[channelId]||0)+1;}if(kind==='command'){b.commands++;const label=String(feature||'버튼').replace(/[^\p{L}\p{N}_ -]/gu,' ').slice(0,80)||'기타';b.features[label]=(b.features[label]||0)+1;}}
  function sample(guilds,previous){const end=now();for(const g of guilds){if(!STATISTICS_GUILDS.has(g.id)||g.available===false)continue;const start=Math.max(last.get(g.id)??end,end-120000);last.set(g.id,end);let entries=[...(g.voiceStates?.cache?.values()||[])];if(previous?.guild.id===g.id){entries=entries.filter(s=>s.id!==previous.id);entries.push(previous);}const states=entries.filter(s=>s.channelId&&s.channelId!==g.afkChannelId&&s.member&&!s.member.user.bot);for(let t=start;t<end;){const boundary=Math.floor((t+32400000)/86400000+1)*86400000-32400000,until=Math.min(end,boundary),seconds=Math.floor((until-t)/1000),b=bucket(g.id,t);b.coverageSeconds+=seconds;b.voiceSeconds+=states.length*seconds;b.streamSeconds+=states.filter(s=>s.streaming).length*seconds;b.peakVoice=Math.max(b.peakVoice,states.length);for(const s of states)person(b,s.id,'voiceUsers');t=until;}}}
- async function flush(){if(busy)return;busy=true;try{for(const b of buckets.values())queue.push(b);buckets.clear();const cutoff=statisticsDay(now()-89*86400000);queue=queue.filter(b=>b.day>=cutoff);if(queue.length>12960){console.error('[통계] 전송 대기 3일 한도 초과 · 오래된 미전송 구간은 누락됩니다.');queue=queue.slice(-12960);}persist();while(queue.length){await send('/api/discord-bot/statistics',queue[0]);queue.shift();persist();}}finally{busy=false;}}
+ async function flush(){if(busy)return;busy=true;try{for(const b of buckets.values())queue.push(b);buckets.clear();const cutoff=statisticsDay(now()-89*86400000);queue=queue.filter(b=>b.day>=cutoff);if(queue.length>17280){console.error('[통계] 전송 대기 3일 한도 초과 · 오래된 미전송 구간은 누락됩니다.');queue=queue.slice(-17280);}persist();while(queue.length){await send('/api/discord-bot/statistics',queue[0]);queue.shift();persist();}}finally{busy=false;}}
  return {activity,sample,flush,pause:()=>last.clear(),pending:()=>queue.length,hash};
 }
 export function installStatistics(client,bridge,secret,readyEvent){const c=createStatisticsCollector({secret,send:bridge});let timer;
