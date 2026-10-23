@@ -12,5 +12,6 @@ export function formatResult(data={},path=''){
  else if(data.preferences?.positions){title='포지션 · 요원 우선순위';out=data.preferences.positions.flatMap((id,n)=>['**'+(n+1)+'순위 · '+(words[id]||text(id))+'**',(data.preferences.agents?.[id]||[]).map(text).join(' → ')||'선택한 요원이 없습니다.']);}
  else {title=path.includes('profile')?'내 정보':data.merchant?'잡상인':path.includes('application')?'가입 지원서':path.includes('notifications')?'알림 설정':title;out=lines(data.merchant?{...data,merchant:undefined}:data);if(data.merchant)out.unshift(...lines(data.merchant));}
  let description=out.join('\n').trim()||((data.ok||data.saved||data.success||data.created)?'요청을 처리했습니다.':'표시할 항목이 없습니다. 필요한 상세 정보는 홈페이지에서 확인하세요.');
+ if(path==='/api/application')description='가입 가능 연령: 만 14세 이상 (생일 기준)\n\n'+description;
  const long=description.length>3800;return {content:'',embeds:[{title,description:long?description.slice(0,3650)+'\n\n내용이 길어 전체 내역을 읽기 쉬운 텍스트 파일로 첨부했어요.':description,color:0xc5f277}],components:[],attachments:[],allowedMentions:{parse:[]},files:long?[{attachment:Buffer.from(description),name:'etg-details.txt'}]:[]};
 }
