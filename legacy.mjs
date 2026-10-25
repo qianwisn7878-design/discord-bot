@@ -14,7 +14,7 @@ export function mayUseLegacyCommand(i){
 function read(file,fallback={}){try{return JSON.parse(fs.readFileSync(path.join(dataDir,file),'utf8'));}catch{return fallback;}}
 function write(file,data){fs.mkdirSync(dataDir,{recursive:true});const target=path.join(dataDir,file);fs.writeFileSync(target+'.tmp',JSON.stringify(data));fs.renameSync(target+'.tmp',target);}
 export async function installLegacy(client,bridge,{members,content}){
- let snapshot=await bridge('/api/discord-bot/legacy-state'),version=snapshot.version,lastSaved='',saving=null;
+ let rosterQueue=Promise.resolve();let snapshot=await bridge('/api/discord-bot/legacy-state'),version=snapshot.version,lastSaved='',saving=null;
  if(!snapshot.rawFiles||!Number.isSafeInteger(version))throw Error('기존 봇 데이터 백업을 확인할 수 없습니다.');
  fs.mkdirSync(dataDir,{recursive:true});
  for(const file of FILES)if(Object.hasOwn(snapshot.rawFiles,file)){const target=file==='google-service-account.json'?path.join(root,file):path.join(dataDir,file);fs.writeFileSync(target,Buffer.from(snapshot.rawFiles[file],'base64'),{mode:0o600});}
@@ -62,7 +62,7 @@ export async function installLegacy(client,bridge,{members,content}){
  const callbacks=client.listeners('clientReady'),legacyReady=callbacks.at(-2),registration=callbacks.at(-1);
  if(legacyReady&&registration){client.removeListener('clientReady',registration);client.prependOnceListener('clientReady',registration);}
  const timer=setInterval(()=>flush().catch(error=>console.error('[기존 정보 백업] '+error.message)),15000);timer.unref();
- return {status,flush,syncRosters:async boards=>{await syncWebsiteRosters(client,boards);await flush();status.rosterSyncAt=new Date().toISOString();},stop:async()=>{clearInterval(timer);await flush();}};
+ return {status,flush,syncRosters:boards=>{const task=rosterQueue.then(async()=>{await syncWebsiteRosters(client,boards);await flush();status.rosterSyncAt=new Date().toISOString();});rosterQueue=task.catch(()=>{});return task;},stop:async()=>{clearInterval(timer);await flush();}};
 }
 
 export async function syncWebsiteRosters(client,boards,storage={read,write}){
@@ -73,7 +73,9 @@ export async function syncWebsiteRosters(client,boards,storage={read,write}){
   const title={general:'운영진·역할',premier:'프리미어 팀',tiers:'팀 티어'}[board.key],lines=['**홈페이지 연동 명단 · '+title+'**','홈페이지에서 수정한 내용이 자동 반영됩니다.'];
   for(const section of board.sections)lines.push('\n**'+String(section.title||'').replace(/([\\*_~`>|])/g,'\\$1')+'**',...(section.lines?.length?section.lines:['미배치']));
   const pages=[];let page='';for(const line of lines){if((page+'\n'+line).length>1900){pages.push(page);page='';}page+=(page?'\n':'')+line;}if(page)pages.push(page);
-  const hash=JSON.stringify(pages),previous=runtime.rosterBoards[board.key]||{};if(previous.hash===hash&&previous.channelId===board.channelId)continue;
+  const hash=JSON.stringify(pages),previous=runtime.rosterBoards[board.key]||{},sourceVersion=Number(board.sourceVersion)||0,sourceAt=Number(board.sourceAt)||0;
+  if((previous.sourceVersion||0)>sourceVersion||((previous.sourceVersion||0)===sourceVersion&&(previous.sourceAt||0)>sourceAt))continue;
+  if(previous.hash===hash&&previous.channelId===board.channelId){if(previous.sourceVersion!==sourceVersion||previous.sourceAt!==sourceAt){runtime.rosterBoards[board.key]={...previous,sourceVersion,sourceAt};storage.write('runtime.json',runtime);}continue;}
   const channel=await client.channels.fetch(board.channelId);if((channel.guildId||channel.guild?.id)!=='1492461447568162876')throw Error('명단 대상은 ETG 팀 서버의 채널이어야 합니다.');
   const ids=previous.channelId===board.channelId?previous.messageIds||[]:[],next=[];
   for(let index=0;index<pages.length;index++){
@@ -82,6 +84,6 @@ export async function syncWebsiteRosters(client,boards,storage={read,write}){
    if(message?.author.id===client.user.id)await message.edit(body);else message=await channel.send(body);next.push(message.id);
   }
   for(const id of ids.slice(pages.length)){const old=await channel.messages.fetch(id).catch(()=>null);if(old?.author.id===client.user.id)await old.edit({content:'명단이 갱신되었습니다. 위의 최신 명단을 확인하세요.',allowedMentions:{parse:[]}});}
-  runtime.rosterBoards[board.key]={channelId:board.channelId,messageIds:next,hash};storage.write('runtime.json',runtime);
+  runtime.rosterBoards[board.key]={channelId:board.channelId,messageIds:next,hash,sourceVersion,sourceAt};storage.write('runtime.json',runtime);
  }
 }

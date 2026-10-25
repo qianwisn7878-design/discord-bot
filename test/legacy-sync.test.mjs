@@ -9,6 +9,13 @@ test('roster display uses website data, includes every page and never edits role
  await syncWebsiteRosters(client,[board],storage);assert(messages.size>1);assert([...messages.values()].some(m=>m.content.includes('100000000000000149')));const before=writes;await syncWebsiteRosters(client,[board],storage);assert.equal(writes,before);
  board.sections=[{title:'상급2',lines:['주전: <@new-player>']}];await syncWebsiteRosters(client,[board],storage);assert([...messages.values()].some(m=>m.content.includes('new-player')));
 });
+test('older directory snapshots never overwrite the latest roster',async()=>{
+ let runtime={},writes=0,last='';const message={id:'m',author:{id:'bot'},edit:async b=>{writes++;last=b.content;}},channel={guildId:'1492461447568162876',messages:{fetch:async()=>message},send:async b=>{writes++;last=b.content;return message;}},client={user:{id:'bot'},channels:{fetch:async()=>channel}},storage={read:()=>structuredClone(runtime),write:(name,value)=>runtime=structuredClone(value)};
+ const board=(who,at,version=1)=>({key:'premier',channelId:'111111111111111111',sourceAt:at,sourceVersion:version,sections:[{title:'team',lines:[who]}]});
+ await syncWebsiteRosters(client,[board('new',200)],storage);const count=writes;await syncWebsiteRosters(client,[board('old',100)],storage);assert.equal(writes,count);assert(last.includes('new'));
+ await syncWebsiteRosters(client,[board('new',300)],storage);await syncWebsiteRosters(client,[board('stale',250)],storage);assert.equal(writes,count);
+ await syncWebsiteRosters(client,[board('new-version',150,2)],storage);assert(last.includes('new-version'));
+});
 test('bot Google adapter signs locally and can only update the approved sheet and tab',async()=>{
  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'etg-synthetic-key-')),keyFile=path.join(temp,'test.json'),originalFetch=globalThis.fetch,calls=[];
  const {privateKey}=crypto.generateKeyPairSync('rsa',{modulusLength:1024});
