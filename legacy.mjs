@@ -79,13 +79,21 @@ export async function syncWebsiteRosters(client,boards,storage={read,write}){
   if((previous.sourceVersion||0)>sourceVersion||((previous.sourceVersion||0)===sourceVersion&&(previous.sourceAt||0)>sourceAt))continue;
   if(previous.hash===hash&&previous.channelId===board.channelId){if(previous.sourceVersion!==sourceVersion||previous.sourceAt!==sourceAt){runtime.rosterBoards[board.key]={...previous,sourceVersion,sourceAt};storage.write('runtime.json',runtime);}continue;}
   const channel=await client.channels.fetch(board.channelId);if((channel.guildId||channel.guild?.id)!=='1492461447568162876')throw Error('명단 대상은 ETG 팀 서버의 채널이어야 합니다.');
-  const ids=previous.channelId===board.channelId?previous.messageIds||[]:[],next=[];
-  for(let index=0;index<pages.length;index++){
-   let message=ids[index]?await channel.messages.fetch(ids[index]).catch(()=>null):null;
-   const body={content:pages[index],allowedMentions:{parse:[]}};
-   if(message?.author.id===client.user.id)await message.edit(body);else message=await channel.send(body);next.push(message.id);
+  const ids=previous.channelId===board.channelId?previous.messageIds||[]:[],next=[],messages=[];
+  for(const id of ids){const message=await channel.messages.fetch(id).catch(()=>null);if(message?.author.id===client.user.id)messages.push(message);}
+  if(!messages.length){
+   const recent=await channel.messages.fetch({limit:100});
+   messages.push(...[...recent.values()].filter(m=>m.author.id===client.user.id&&m.content?.startsWith(lines[0])).sort((a,b)=>a.id.localeCompare(b.id)));
   }
-  for(const id of ids.slice(pages.length)){const old=await channel.messages.fetch(id).catch(()=>null);if(old?.author.id===client.user.id)await old.edit({content:'명단이 갱신되었습니다. 위의 최신 명단을 확인하세요.',allowedMentions:{parse:[]}});}
+  if(!messages.length)continue; // Existing roster messages only; never repost deleted boards.
+  const overflow=pages.length>messages.length;
+  for(let index=0;index<messages.length;index++){
+   const attachment=overflow&&index===messages.length-1;
+   const body={content:attachment?'전체 명단은 첨부 파일에서 확인하세요.':pages[index]||'명단이 갱신되었습니다. 위의 최신 명단을 확인하세요.',allowedMentions:{parse:[]},attachments:[]};
+   if(attachment)body.files=[{attachment:Buffer.from(lines.join('\n'),'utf8'),name:'명단.txt'}];
+   await messages[index].edit(body);next.push(messages[index].id);
+  }
   runtime.rosterBoards[board.key]={channelId:board.channelId,messageIds:next,hash,sourceVersion,sourceAt};storage.write('runtime.json',runtime);
  }
 }
+

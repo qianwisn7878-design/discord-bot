@@ -1,20 +1,27 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import crypto from 'node:crypto';import {createRequire} from 'node:module';
 import {syncWebsiteRosters} from '../legacy.mjs';
 const require=createRequire(import.meta.url),{google}=require('../legacy/google-client.cjs');
-test('roster display uses website data, includes every page and never edits roles',async()=>{
- let saved={},seq=0,writes=0;const messages=new Map,channel={guildId:'1492461447568162876',messages:{fetch:async id=>messages.get(id)},send:async body=>{writes++;assert.deepEqual(body.allowedMentions,{parse:[]});const m={id:String(++seq),author:{id:'helper'},edit:async b=>{writes++;m.content=b.content;},content:body.content};messages.set(m.id,m);return m;}};
- const client={user:{id:'helper'},channels:{fetch:async()=>channel}};
- Object.defineProperty(client,'guilds',{get(){throw Error('role mutations must not be used');}});
- const storage={read:()=>structuredClone(saved),write:(name,data)=>{saved=structuredClone(data);}},board={key:'premier',channelId:'111111111111111111',sections:[{title:'상급1',lines:Array.from({length:150},(_,n)=>'주전: <@'+String(100000000000000000n+BigInt(n))+'>')}]};
- await syncWebsiteRosters(client,[board],storage);assert(messages.size>1);assert([...messages.values()].some(m=>m.content.includes('100000000000000149')));const before=writes;await syncWebsiteRosters(client,[board],storage);assert.equal(writes,before);
- board.sections=[{title:'상급2',lines:['주전: <@new-player>']}];await syncWebsiteRosters(client,[board],storage);assert([...messages.values()].some(m=>m.content.includes('new-player')));
+function fixture(sections, existing=true){
+ let runtime={},edits=[],scans=0;
+ const message={id:'m',author:{id:'bot'},content:'**홈페이지 연동 명단 · 프리미어 팀**',edit:async body=>{edits.push(body);message.content=body.content;}};
+ const channel={guildId:'1492461447568162876',messages:{fetch:async query=>typeof query==='object'?(scans++,new Map(existing?[[message.id,message]]:[])):existing?message:null},send:async()=>{throw Error('must never send a new roster message');}};
+ return {edits,client:{user:{id:'bot'},channels:{fetch:async()=>channel}},storage:{read:()=>structuredClone(runtime),write:(_,value)=>runtime=structuredClone(value)},board:{key:'premier',channelId:'1563935082278821912',sourceAt:200,sourceVersion:1,sections}};
+}
+test('existing roster is discovered and edited; overflow stays in the same message as a complete attachment',async()=>{
+ const f=fixture([{title:'중급',lines:Array.from({length:150},(_,n)=>'synthetic-player-'+n)}]);
+ await syncWebsiteRosters(f.client,[f.board],f.storage);
+ assert.equal(f.edits.length,1);assert(f.edits[0].files[0].attachment.toString().includes('synthetic-player-149'));
+ await syncWebsiteRosters(f.client,[f.board],f.storage);assert.equal(f.edits.length,1);
+ f.board.sections=[{title:'초급',lines:['new-player']}];await syncWebsiteRosters(f.client,[f.board],f.storage);
+ assert(f.edits.at(-1).content.includes('new-player'));assert.deepEqual(f.edits.at(-1).attachments,[]);
+});
+test('missing or deleted roster is never recreated',async()=>{
+ const f=fixture([{title:'중급',lines:[]}],false);await syncWebsiteRosters(f.client,[f.board],f.storage);assert.equal(f.edits.length,0);
 });
 test('older directory snapshots never overwrite the latest roster',async()=>{
- let runtime={},writes=0,last='';const message={id:'m',author:{id:'bot'},edit:async b=>{writes++;last=b.content;}},channel={guildId:'1492461447568162876',messages:{fetch:async()=>message},send:async b=>{writes++;last=b.content;return message;}},client={user:{id:'bot'},channels:{fetch:async()=>channel}},storage={read:()=>structuredClone(runtime),write:(name,value)=>runtime=structuredClone(value)};
- const board=(who,at,version=1)=>({key:'premier',channelId:'111111111111111111',sourceAt:at,sourceVersion:version,sections:[{title:'team',lines:[who]}]});
- await syncWebsiteRosters(client,[board('new',200)],storage);const count=writes;await syncWebsiteRosters(client,[board('old',100)],storage);assert.equal(writes,count);assert(last.includes('new'));
- await syncWebsiteRosters(client,[board('new',300)],storage);await syncWebsiteRosters(client,[board('stale',250)],storage);assert.equal(writes,count);
- await syncWebsiteRosters(client,[board('new-version',150,2)],storage);assert(last.includes('new-version'));
+ const f=fixture([{title:'team',lines:['new']}]);await syncWebsiteRosters(f.client,[f.board],f.storage);
+ f.board.sourceAt=100;f.board.sections[0].lines=['old'];await syncWebsiteRosters(f.client,[f.board],f.storage);assert.equal(f.edits.length,1);
+ f.board.sourceVersion=2;await syncWebsiteRosters(f.client,[f.board],f.storage);assert.equal(f.edits.length,2);
 });
 test('bot Google adapter signs locally and can only update the approved sheet and tab',async()=>{
  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'etg-synthetic-key-')),keyFile=path.join(temp,'test.json'),originalFetch=globalThis.fetch,calls=[];
@@ -29,3 +36,4 @@ test('bot Google adapter signs locally and can only update the approved sheet an
   const before=calls.length;await assert.rejects(()=>sheets.spreadsheets.values.update({spreadsheetId:'other',range:'정보!A1',requestBody:{values:[]}}),/승인/);assert.equal(calls.length,before);
  }finally{globalThis.fetch=originalFetch;fs.unlinkSync(keyFile);fs.rmdirSync(temp);}
 });
+
