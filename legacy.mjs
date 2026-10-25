@@ -1,10 +1,11 @@
 import fs from 'node:fs';
+import {createInfoPanelRecovery} from './info-panels.mjs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),root=fileURLToPath(new URL('./legacy/',import.meta.url)),dataDir=path.join(root,'data');
 const GUILDS=new Set(['1492461447568162876','1477820654739787858']),OWNER='794026986002448414',MANAGER='1515403509103722627';
-const FILES=['activityTimeMessage.json','ageMessage.json','genderMessage.json','gradeRosters.json','rosterMembers.json','rosters.json','termsMessages.json','tierMessage.json','tierRosters.json','userInfo.json','google-service-account.json','valorantNicknameMessage.json','runtime.json'];
+const FILES=['activityTimeMessage.json','ageMessage.json','phoneMessage.json','genderMessage.json','gradeRosters.json','rosterMembers.json','rosters.json','termsMessages.json','tierMessage.json','tierRosters.json','userInfo.json','google-service-account.json','valorantNicknameMessage.json','runtime.json'];
 export function legacyCapabilities(flags){const bits=BigInt(flags||0);return {members:!!(bits&((1n<<14n)|(1n<<15n))),content:!!(bits&((1n<<18n)|(1n<<19n)))};}
 export function isLegacyInteraction(i,names){return i.isChatInputCommand()?names.has(i.commandName):/^(age_select_|gender_|valorant_nickname_|activity_time_|tier_select_|tier_grade_|tier_back$|phone_)/.test(i.customId||'');}
 export function mayUseLegacyCommand(i){
@@ -28,6 +29,7 @@ export async function installLegacy(client,bridge,{members,content}){
   try{await saving;}finally{saving=null;}
  };
  const scoped=Object.create(client),names=new Set();scoped.__legacyBridge=bridge;scoped.__legacyStatus=status;
+ const infoPanels=createInfoPanelRecovery(scoped,{onStatus:value=>{status.infoPanels=value;},onError:()=>{status.errors.push('입력 안내 메시지 복구 실패');status.errors=status.errors.slice(-10);}});scoped.__ensureInformationPanels=infoPanels.ensure;
  scoped.__isLegacyInteraction=i=>isLegacyInteraction(i,names);
  scoped.__authorizeLegacy=async i=>{
   if(!mayUseLegacyCommand(i)){await i.reply({content:'이 명령어는 총괄·매니저만 사용할 수 있습니다.',flags:64});return false;}
@@ -62,7 +64,7 @@ export async function installLegacy(client,bridge,{members,content}){
  const callbacks=client.listeners('clientReady'),legacyReady=callbacks.at(-2),registration=callbacks.at(-1);
  if(legacyReady&&registration){client.removeListener('clientReady',registration);client.prependOnceListener('clientReady',registration);}
  const timer=setInterval(()=>flush().catch(error=>console.error('[기존 정보 백업] '+error.message)),15000);timer.unref();
- return {status,flush,syncRosters:boards=>{const task=rosterQueue.then(async()=>{await syncWebsiteRosters(client,boards);await flush();status.rosterSyncAt=new Date().toISOString();});rosterQueue=task.catch(()=>{});return task;},stop:async()=>{clearInterval(timer);await flush();}};
+ return {status,flush,ensureInfoPanels:async()=>{await infoPanels.ensure();await flush();},syncRosters:boards=>{const task=rosterQueue.then(async()=>{await syncWebsiteRosters(client,boards);await flush();status.rosterSyncAt=new Date().toISOString();});rosterQueue=task.catch(()=>{});return task;},stop:async()=>{clearInterval(timer);infoPanels.stop();await flush();}};
 }
 
 export async function syncWebsiteRosters(client,boards,storage={read,write}){

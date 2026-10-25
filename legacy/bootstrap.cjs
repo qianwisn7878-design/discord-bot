@@ -1,5 +1,4 @@
 const {Collection,Events}=require('discord.js');
-const fs=require('node:fs'),path=require('node:path');
 const phone=require('./systems/phoneSystem.cjs'),activity=require('./systems/activityTimeSystem.cjs'),nickname=require('./systems/valorantNicknameSystem.cjs');
 const age=require('./systems/ageSystem.cjs'),gender=require('./systems/genderSystem.cjs'),tier=require('./systems/tierSystem.cjs');
 module.exports=function installLegacy(client){
@@ -7,10 +6,9 @@ module.exports=function installLegacy(client){
  for(const file of ['command-13.cjs','command-14.cjs']){const command=require('./commands/'+file);client.legacyCommands.set(command.data.name,command);}
  client.once(Events.ClientReady,async()=>{
   for(const [moduleName,method] of [
-   ['joinLeaveLogSystem','startJoinLeaveLogSystem'],['chatLogSystem','startChatLogSystem'],['voiceLogSystem','startVoiceLogSystem'],['reactionLogSystem','startReactionLogSystem'],['autoRoleSystem','startAutoRoleSystem'],['roleLogSystem','startRoleLogSystem'],['termsSystem','startTermsSystem'],['photoTimeoutSystem','startPhotoTimeoutSystem'],['phoneSystem','startPhoneSystem']
-  ]){try{await require('./systems/'+moduleName+'.cjs')[method](client);}catch(error){client.__legacyStatus.errors.push(moduleName+': '+error.message);}}
-  try{const file=path.join(__dirname,'data','ageMessage.json');let old={};try{old=JSON.parse(fs.readFileSync(file,'utf8'));}catch{}if(!old.sent){await age.sendAgeMessage(client);fs.writeFileSync(file,JSON.stringify({sent:true}));}}catch(error){client.__legacyStatus.errors.push('age: '+error.message);}
-  for(const [system,method] of [[gender,'sendGenderMessage'],[tier,'sendTierMessage'],[activity,'sendActivityTimeMessage'],[nickname,'sendValorantNicknameMessage']]){try{await system[method](client);}catch(error){client.__legacyStatus.errors.push(method+': '+error.message);}}
+   ['joinLeaveLogSystem','startJoinLeaveLogSystem'],['chatLogSystem','startChatLogSystem'],['voiceLogSystem','startVoiceLogSystem'],['reactionLogSystem','startReactionLogSystem'],['autoRoleSystem','startAutoRoleSystem'],['roleLogSystem','startRoleLogSystem'],['termsSystem','startTermsSystem'],['photoTimeoutSystem','startPhotoTimeoutSystem']
+  ]){try{await require('./systems/'+moduleName+'.cjs')[method](client);if(moduleName==='termsSystem')client.__legacyStatus.termsReady=true;}catch(error){client.__legacyStatus.errors.push(moduleName+': '+error.message);}}
+  try{await client.__ensureInformationPanels();}catch(error){client.__legacyStatus.errors.push('입력 안내 메시지 복구 실패');}
   try{await require('./systems/googleSheetSyncSystem.cjs').startGoogleSheetSync(client);}catch(error){client.__legacyStatus.errors.push('Google 시트 연결 실패');}
  });
  client.on(Events.InteractionCreate,async interaction=>{

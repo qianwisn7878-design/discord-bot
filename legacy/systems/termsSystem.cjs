@@ -64,24 +64,22 @@ async function createTermsMessages(client) {
             await channel.messages.fetch({
                 limit: 50
             });
-        const existingTerms =
-            messages.find(
+        const existingTerms=messages.find(
                 message =>
                     message.author.id ===
                         client.user.id &&
                     message.content.includes(
                         '[ 필수 ] 이용약관 동의'
                     )
-            );
-        const existingPrivacy =
-            messages.find(
+            )||(termsMessageId?await channel.messages.fetch(termsMessageId).catch(error=>{if(error.status!==404&&error.code!==10008)throw error;return null;}):null);
+        const existingPrivacy=messages.find(
                 message =>
                     message.author.id ===
                         client.user.id &&
                     message.content.includes(
                         '[ 필수 ] 개인정보 수집 및 이용 동의'
                     )
-            );
+            )||(privacyMessageId?await channel.messages.fetch(privacyMessageId).catch(error=>{if(error.status!==404&&error.code!==10008)throw error;return null;}):null);
         if (existingTerms) {
             termsMessageId =
                 existingTerms.id;
@@ -425,6 +423,4 @@ async function startTermsSystem(client) {
         '✅ 약관 동의 시스템 시작'
     );
 }
-module.exports = {
-    startTermsSystem
-};
+module.exports = {startTermsSystem,createTermsMessages};
