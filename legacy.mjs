@@ -74,8 +74,9 @@ export async function syncWebsiteRosters(client,boards,storage={read,write}){
   if(!['general','premier','tiers'].includes(board.key)||!/^\d{17,20}$/.test(board.channelId||'')||!Array.isArray(board.sections))continue;
   const title={general:'운영진·역할',premier:'프리미어 팀',tiers:'팀 티어'}[board.key],lines=['**홈페이지 연동 명단 · '+title+'**','홈페이지에서 수정한 내용이 자동 반영됩니다.'];
   for(const section of board.sections)lines.push('\n**'+String(section.title||'').replace(/([\\*_~`>|])/g,'\\$1')+'**',...(section.lines?.length?section.lines:['미배치']));
-  const pages=[];let page='';for(const line of lines){if((page+'\n'+line).length>1900){pages.push(page);page='';}page+=(page?'\n':'')+line;}if(page)pages.push(page);
-  const hash=JSON.stringify(pages),previous=runtime.rosterBoards[board.key]||{},sourceVersion=Number(board.sourceVersion)||0,sourceAt=Number(board.sourceAt)||0;
+  const content=lines.join('\n');
+  if(content.length>2000)throw Error('명단이 Discord 일반 메시지 2,000자 제한을 초과했습니다. 기존 메시지를 유지합니다.');
+  const hash=JSON.stringify(['plain-single-v1',content]),previous=runtime.rosterBoards[board.key]||{},sourceVersion=Number(board.sourceVersion)||0,sourceAt=Number(board.sourceAt)||0;
   if((previous.sourceVersion||0)>sourceVersion||((previous.sourceVersion||0)===sourceVersion&&(previous.sourceAt||0)>sourceAt))continue;
   if(previous.hash===hash&&previous.channelId===board.channelId){if(previous.sourceVersion!==sourceVersion||previous.sourceAt!==sourceAt){runtime.rosterBoards[board.key]={...previous,sourceVersion,sourceAt};storage.write('runtime.json',runtime);}continue;}
   const channel=await client.channels.fetch(board.channelId);if((channel.guildId||channel.guild?.id)!=='1492461447568162876')throw Error('명단 대상은 ETG 팀 서버의 채널이어야 합니다.');
@@ -86,13 +87,8 @@ export async function syncWebsiteRosters(client,boards,storage={read,write}){
    messages.push(...[...recent.values()].filter(m=>m.author.id===client.user.id&&m.content?.startsWith(lines[0])).sort((a,b)=>a.id.localeCompare(b.id)));
   }
   if(!messages.length)continue; // Existing roster messages only; never repost deleted boards.
-  const overflow=pages.length>messages.length;
-  for(let index=0;index<messages.length;index++){
-   const attachment=overflow&&index===messages.length-1;
-   const body={content:attachment?'전체 명단은 첨부 파일에서 확인하세요.':pages[index]||'명단이 갱신되었습니다. 위의 최신 명단을 확인하세요.',allowedMentions:{parse:[]},attachments:[]};
-   if(attachment)body.files=[{attachment:Buffer.from(lines.join('\n'),'utf8'),name:'명단.txt'}];
-   await messages[index].edit(body);next.push(messages[index].id);
-  }
+  const message=messages[0];
+  await message.edit({content,allowedMentions:{parse:[]},attachments:[],embeds:[]});next.push(message.id);
   runtime.rosterBoards[board.key]={channelId:board.channelId,messageIds:next,hash,sourceVersion,sourceAt};storage.write('runtime.json',runtime);
  }
 }

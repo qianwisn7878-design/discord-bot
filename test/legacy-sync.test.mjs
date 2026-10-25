@@ -7,14 +7,15 @@ function fixture(sections, existing=true){
  const channel={guildId:'1492461447568162876',messages:{fetch:async query=>typeof query==='object'?(scans++,new Map(existing?[[message.id,message]]:[])):existing?message:null},send:async()=>{throw Error('must never send a new roster message');}};
  return {edits,client:{user:{id:'bot'},channels:{fetch:async()=>channel}},storage:{read:()=>structuredClone(runtime),write:(_,value)=>runtime=structuredClone(value)},board:{key:'premier',channelId:'1563935082278821912',sourceAt:200,sourceVersion:1,sections}};
 }
-test('existing roster is discovered and edited; overflow stays in the same message as a complete attachment',async()=>{
- const f=fixture([{title:'중급',lines:Array.from({length:150},(_,n)=>'synthetic-player-'+n)}]);
+test('existing roster is discovered and edited; full plain text stays in one message without files or embeds',async()=>{
+ const f=fixture([{title:'중급',lines:['x'.repeat(1850),'synthetic-player-last']}]);
  await syncWebsiteRosters(f.client,[f.board],f.storage);
- assert.equal(f.edits.length,1);assert(f.edits[0].files[0].attachment.toString().includes('synthetic-player-149'));
+ assert.equal(f.edits.length,1);assert(f.edits[0].content.includes('synthetic-player-last'));assert.equal(f.edits[0].files,undefined);assert.deepEqual(f.edits[0].embeds,[]);assert(f.edits[0].content.length>1900);assert(f.edits[0].content.length<=2000);
  await syncWebsiteRosters(f.client,[f.board],f.storage);assert.equal(f.edits.length,1);
  f.board.sections=[{title:'초급',lines:['new-player']}];await syncWebsiteRosters(f.client,[f.board],f.storage);
  assert(f.edits.at(-1).content.includes('new-player'));assert.deepEqual(f.edits.at(-1).attachments,[]);
 });
+test('over 2000 characters preserves the existing message without sending or attaching anything',async()=>{const f=fixture([{title:'team',lines:['x'.repeat(2000)]}]);await assert.rejects(()=>syncWebsiteRosters(f.client,[f.board],f.storage),/2,000/);assert.equal(f.edits.length,0);});
 test('missing or deleted roster is never recreated',async()=>{
  const f=fixture([{title:'중급',lines:[]}],false);await syncWebsiteRosters(f.client,[f.board],f.storage);assert.equal(f.edits.length,0);
 });
