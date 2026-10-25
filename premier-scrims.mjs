@@ -10,17 +10,22 @@ const safe=s=>String(s).replace(/([\\*_~`>|])/g,'\\$1');
 const embed=(title,description)=>({title,description,color:0xc5f277});
 const when=item=>'<t:'+Math.floor(Date.parse(item.startsAt)/1000)+':F>';
 export function isTeamScrimInteraction(i){return i.isChatInputCommand()&&i.commandName==='스크림'||(i.isButton()||i.isStringSelectMenu()||i.isModalSubmit())&&i.customId.startsWith('etgp:');}
-export function parseScrimKoreanDate(value){
- if(!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/.test(value))throw Error('일정은 한국 시간 YYYY-MM-DD HH:mm 형식으로 입력하세요.');
- const normalized=value.replace(' ','T'),date=new Date(normalized+':00+09:00');
- if(!Number.isFinite(date.getTime())||new Date(date.getTime()+9*3600000).toISOString().slice(0,16)!==normalized)throw Error('실제로 존재하는 날짜와 시간을 입력하세요.');
- return date.toISOString();
+export function parseScrimKoreanDate(value,now=Date.now()){
+ const match=/^(\d{2})월\s+(\d{2})일\s+(\d{2}):(\d{2})$/.exec(value);
+ if(!match)throw Error('일정은 한국 시간 01월 01일 00:20 형식으로 입력하세요.');
+ const [,month,day,hour,minute]=match,year=new Date(now+9*3600000).getUTCFullYear();
+ for(let offset=0;offset<9;offset++){
+  const normalized=(year+offset)+'-'+month+'-'+day+'T'+hour+':'+minute,date=new Date(normalized+':00+09:00');
+  if(Number.isFinite(date.getTime())&&new Date(date.getTime()+9*3600000).toISOString().slice(0,16)===normalized&&date.getTime()>now)return date.toISOString();
+ }
+ throw Error('실제로 존재하는 날짜와 시간을 입력하세요.');
 }
 export async function handleTeamScrimInteraction(i,bridge,ephemeralFlag){
+ if(i.guildId!=='1492461447568162876')throw Error('스크림은 ETG 프리미어 팀 서버 안에서만 신청할 수 있습니다.');
  const request=data=>bridge('/api/discord-bot/action',{guildId:i.guildId,userId:i.user.id,name:i.member?.displayName||i.user.globalName||i.user.username,interactionId:i.id,path:'/api/premier/scrims',method:data?'POST':'GET',...(data?{data}:{})});
  const parts=(i.customId||'etgp:list:0').split(':'),action=parts[1];
  if(action==='create'){
-  await i.showModal({custom_id:'etgp:submit',title:'우리 팀 스크림 상대 구하기',components:[['startsAt','경기 일정 · 한국 시간 YYYY-MM-DD HH:mm',1,true,16],['map','맵 · 예: 어센트 또는 협의',1,true,80],['note','모집 내용 · 희망 수준, 경기 수, 연락 방법',2,false,1000]].map(([id,label,style,required,max_length])=>row([{type:4,custom_id:id,label,style,required,max_length}]))});return;
+  await i.showModal({custom_id:'etgp:submit',title:'우리 팀 스크림 상대 구하기',components:[['startsAt','경기 일정 · 한국 시간 (연도 자동)',1,true,20],['map','맵 · 예: 어센트 또는 협의',1,true,80],['note','모집 내용 · 희망 수준, 경기 수, 연락 방법',2,false,1000]].map(([id,label,style,required,max_length])=>row([{type:4,custom_id:id,label,style,required,max_length,...(id==='startsAt'?{placeholder:'01월 01일 00:20'}:{})}]))});return;
  }
  await i.deferReply({flags:ephemeralFlag});
  const reply=body=>i.editReply({content:'',embeds:[],components:[],allowedMentions:{parse:[]},...body});
@@ -78,7 +83,7 @@ export async function syncTeamScrimPanels(client,data){
   }
   const items=data.items||[],active=items.filter(item=>['open','confirmed'].includes(item.status));
   const payloads={
-   guide:{embeds:[{...embed('프리미어 팀 스크림 이용 안내','1. **상대 구하기**에서 한국 시간 일정·맵·모집 내용을 입력하세요.\n2. **모집 목록**에서 상대 팀의 글을 선택하고 **우리 팀으로 참여 → 확정**을 누르세요.\n3. 참여 취소·모집 취소·경기 종료도 같은 메뉴에서 할 수 있습니다.\n\n홈페이지 프리미어 로스터와 현재 Discord 팀 역할을 확인합니다. 소속 팀으로만 모집·참여할 수 있고, 일정 전후 2시간 이내 중복 경기는 제한됩니다.\n\n`/스크림` 명령으로도 열 수 있습니다. 일정 입력은 한국 시간(UTC+9)입니다.'),footer:{text:'ETG 팀 스크림 · guide'}}],components:[row([btn('상대 구하기','create',1),btn('모집 목록','list:0'),link])]},
+   guide:{embeds:[{...embed('프리미어 팀 스크림 이용 안내','1. **상대 구하기**에서 한국 시간 일정·맵·모집 내용을 입력하세요.\n2. **모집 목록**에서 상대 팀의 글을 선택하고 **우리 팀으로 참여 → 확정**을 누르세요.\n3. 참여 취소·모집 취소·경기 종료도 같은 메뉴에서 할 수 있습니다.\n\n상급1·상급2·상급3처럼 현재 Discord 하위 팀 역할로 본인 팀을 확인합니다. 소속 팀으로만 모집·참여할 수 있고, 일정 전후 2시간 이내 중복 경기는 제한됩니다.\n\n`/스크림` 명령으로도 열 수 있습니다. 일정은 **01월 01일 00:20** 형식의 한국 시간(UTC+9)으로 입력합니다. 연도는 다가오는 날짜로 자동 적용되며 180일 이내 일정만 등록할 수 있습니다.'),footer:{text:'ETG 팀 스크림 · guide'}}],components:[row([btn('상대 구하기','create',1),btn('모집 목록','list:0'),link])]},
    board:{embeds:[{...embed('팀 스크림 모집판',active.length?active.slice(0,10).map(item=>'**'+safe(item.hostTeam.name)+' vs '+safe(item.guestTeam?.name||'상대 모집 중')+'**\n'+labels[item.status]+' · '+when(item)+' · '+safe(item.map)).join('\n\n')+'\n\n총 '+active.length+'건 · 목록에서 전체 모집을 확인하세요.':'현재 모집 중이거나 확정된 스크림이 없습니다. **상대 구하기**로 우리 팀의 모집을 시작하세요.'),footer:{text:'ETG 팀 스크림 · board'}}],components:[row([btn('모집 목록','list:0',1),btn('우리 팀 스크림','list:0:mine'),btn('+ 상대 구하기','create'),link])]}
   };
   for(const key of ['guide','board']){

@@ -4,7 +4,7 @@ import {isTeamScrimInteraction,handleTeamScrimInteraction,parseScrimKoreanDate,s
 const guild='1492461447568162876',user='111111111111111111';
 const fixture=()=>({myTeam:{id:'a',name:'상급1'},items:[{id:'item',revision:4,hostTeam:{id:'b',name:'상급2'},guestTeam:null,status:'open',startsAt:new Date(Date.now()+86400000).toISOString(),map:'협의',note:'연습',createdAt:new Date().toISOString()}]});
 function interaction(id){const result={id:'222222222222222222',guildId:guild,user:{id:user,username:'user'},customId:id,outputs:[],isChatInputCommand:()=>false,isButton:()=>true,isStringSelectMenu:()=>false,isModalSubmit:()=>false,deferReply:async data=>{result.flags=data.flags;},editReply:async data=>{result.outputs.push(data);},showModal:async data=>{result.modal=data;}};return result;}
-test('Korean dates are exact and invalid calendar days are rejected',()=>{assert.equal(parseScrimKoreanDate('2026-10-26 20:00'),'2026-10-26T11:00:00.000Z');for(const bad of ['2026-02-31 20:00','2026-10-26 25:00','2026-10-26','bad'])assert.throws(()=>parseScrimKoreanDate(bad));});
+test('Korean dates infer the next year and reject invalid calendar days',()=>{const now=Date.parse('2026-10-25T11:00:00Z');assert.equal(parseScrimKoreanDate('01월 01일 00:20',now),'2026-12-31T15:20:00.000Z');assert.equal(parseScrimKoreanDate('10월 26일 20:00',now),'2026-10-26T11:00:00.000Z');assert.equal(parseScrimKoreanDate('02월 29일 20:00',now),'2028-02-29T11:00:00.000Z');for(const bad of ['02월 31일 20:00','10월 26일 25:00','2026-10-26','bad'])assert.throws(()=>parseScrimKoreanDate(bad,now));});
 test('recognizes only its command and component namespace',()=>{assert(isTeamScrimInteraction(interaction('etgp:list:0')));assert(!isTeamScrimInteraction(interaction('etg:join:1')));assert(isTeamScrimInteraction({...interaction(''),isChatInputCommand:()=>true,commandName:'스크림'}));});
 test('detail shows confirmation before posting an action with trusted Discord identity',async()=>{
  const calls=[],bridge=async(path,body)=>{calls.push(body);assert.equal(path,'/api/discord-bot/action');assert.equal(body.userId,user);assert.equal(body.guildId,guild);assert.equal(body.path,'/api/premier/scrims');return fixture();};
@@ -14,9 +14,9 @@ test('detail shows confirmation before posting an action with trusted Discord id
  await assert.rejects(()=>handleTeamScrimInteraction(interaction('etgp:confirm:join:item:3'),bridge,64),/변경/);
 });
 test('modal acknowledges immediately and submits fields to the shared API',async()=>{
- const i=interaction('etgp:create');await handleTeamScrimInteraction(i,()=>{throw Error('should not fetch before modal');},64);assert.equal(i.modal.custom_id,'etgp:submit');assert.equal(i.flags,undefined);
- const submit=interaction('etgp:submit');submit.fields={getTextInputValue:key=>({startsAt:'2026-10-26 20:00',map:'어센트',note:'연습'}[key])};let captured;
- await handleTeamScrimInteraction(submit,async(path,body)=>{captured=body;return fixture();},64);assert.equal(captured.data.action,'create');assert.equal(captured.data.startsAt,'2026-10-26T11:00:00.000Z');assert.equal(captured.userId,user);
+ const i=interaction('etgp:create');await handleTeamScrimInteraction(i,()=>{throw Error('should not fetch before modal');},64);assert.equal(i.modal.custom_id,'etgp:submit');assert.equal(i.modal.components[0].components[0].placeholder,'01월 01일 00:20');assert.equal(i.flags,undefined);
+ const submit=interaction('etgp:submit');submit.fields={getTextInputValue:key=>({startsAt:'01월 01일 00:20',map:'어센트',note:'연습'}[key])};let captured;
+ await handleTeamScrimInteraction(submit,async(path,body)=>{captured=body;return fixture();},64);assert.equal(captured.data.action,'create');assert.equal(captured.data.startsAt,parseScrimKoreanDate('01월 01일 00:20'));assert.equal(captured.userId,user);
 });
 test('list pagination and absent team hide creation controls',async()=>{const data=fixture();data.myTeam=null;data.items=Array.from({length:26},(_,n)=>({...data.items[0],id:String(n)}));const i=interaction('etgp:list:0');await handleTeamScrimInteraction(i,async()=>data,64);assert.equal(i.outputs[0].components[0].components[0].options.length,25);assert(!JSON.stringify(i.outputs).includes('etgp:create'));assert(JSON.stringify(i.outputs).includes('etgp:list:25:active'));});
 test('channels are inside the requested category and shared messages update without duplicates',async()=>{
