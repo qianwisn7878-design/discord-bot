@@ -35,7 +35,7 @@ export async function handleTeamScrimInteraction(i,bridge,ephemeralFlag){
  }
  if(action==='create-mode'){
   const mode=parts[2];if(!['fixed','later','veto'].includes(mode))throw Error('맵 결정 방식을 확인하세요.');
-  await i.deferReply({flags:ephemeralFlag});const data=await request();
+  await i.deferUpdate();const data=await request();
   for(const [id,d] of scrimDrafts)if(d.until<Date.now())scrimDrafts.delete(id);
   const d={id:randomUUID(),userId:i.user.id,mapMode:mode,region:'KR',rounds:13,count:1,maps:[],index:0,allMaps:data.mapPool||[],until:Date.now()+1800000};scrimDrafts.set(d.id,d);
   await i.editReply(settings(d));return;
@@ -43,7 +43,7 @@ export async function handleTeamScrimInteraction(i,bridge,ephemeralFlag){
  if(action==='draft-modal'){
   const d=getDraft(parts[2]);await i.showModal({custom_id:'etgp:submit-draft:'+d.id,title:'우리 팀 스크림 상대 구하기',components:[['startsAt','경기 일정 · 한국 시간 (연도 자동)',1,true,20],['note','모집 내용',2,false,1000]].map(([id,label,style,required,max_length])=>row([{type:4,custom_id:id,label,style,required,max_length,...(id==='startsAt'?{placeholder:'01월 01일 00:20'}:{})}]))});return;
  }
- await i.deferReply({flags:ephemeralFlag});
+ if(['draft-option','draft-next','draft-map','map-choose'].includes(action))await i.deferUpdate();else await i.deferReply({flags:ephemeralFlag});
  const reply=body=>i.editReply({content:'',embeds:[],components:[],allowedMentions:{parse:[]},...body});
  if(action==='draft-option'||action==='draft-next'||action==='draft-map'){
   const d=getDraft(parts[2]);
@@ -165,4 +165,3 @@ async function syncTeamScrimPanelsNow(client,data){
   return {guildId:panels.guildId,guideChannelId:panels.guide.channelId,boardChannelId:panels.board.channelId,version:'team-scrims-v1',publicationMode:'individual-posts-v1',postCount:[...recruitmentPosts.values()].filter(post=>post.messageId).length};
  }catch(error){panels=null;throw error;}
 }
-

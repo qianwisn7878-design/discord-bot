@@ -3,7 +3,17 @@ import assert from 'node:assert/strict';
 import {isTeamScrimInteraction,handleTeamScrimInteraction,parseScrimKoreanDate,syncTeamScrimPanels,TEAM_SCRIM_CATEGORY,teamScrimPostPayload} from '../premier-scrims.mjs';
 const guild='1492461447568162876',user='111111111111111111';
 const fixture=()=>({mapPool:['바인드','어센트','스플릿'],myTeam:{id:'a',name:'상급1'},items:[{id:'item',revision:4,hostTeam:{id:'b',name:'상급2'},guestTeam:null,status:'open',startsAt:new Date(Date.now()+86400000).toISOString(),map:'협의',note:'연습',createdAt:new Date().toISOString()}]});
-function interaction(id){const result={id:'222222222222222222',guildId:guild,user:{id:user,username:'user'},customId:id,outputs:[],reply:async data=>{result.outputs.push(data);},isChatInputCommand:()=>false,isButton:()=>true,isStringSelectMenu:()=>false,isModalSubmit:()=>false,deferReply:async data=>{result.flags=data.flags;},editReply:async data=>{result.outputs.push(data);},showModal:async data=>{result.modal=data;}};return result;}
+function interaction(id){const result={id:'222222222222222222',guildId:guild,user:{id:user,username:'user'},customId:id,outputs:[],reply:async data=>{result.outputs.push(data);},isChatInputCommand:()=>false,isButton:()=>true,isStringSelectMenu:()=>false,isModalSubmit:()=>false,deferUpdate:async()=>{},deferReply:async data=>{result.flags=data.flags;},editReply:async data=>{result.outputs.push(data);},showModal:async data=>{result.modal=data;}};return result;}
+test('draft dropdown changes update the originating message without a new reply',async()=>{
+ const source=interaction('etgp:create-mode:veto');let updates=0;source.deferUpdate=async()=>updates++;
+ await handleTeamScrimInteraction(source,async()=>fixture(),64);assert.equal(updates,1);
+ const id=source.outputs[0].components[0].components[0].custom_id.split(':')[2];
+ for(const [field,value] of [['region','AP'],['rounds','24'],['count','3']]){
+  const i=interaction('etgp:draft-option:'+id+':'+field);i.values=[value];i.deferUpdate=async()=>updates++;i.deferReply=async()=>{throw Error('must edit original message');};
+  await handleTeamScrimInteraction(i,async()=>{throw Error('draft settings are local');},64);assert.equal(i.outputs.length,1);
+ }
+ assert.equal(updates,4);
+});
 test('Korean dates infer the next year and reject invalid calendar days',()=>{const now=Date.parse('2026-10-25T11:00:00Z');assert.equal(parseScrimKoreanDate('01월 01일 00:20',now),'2026-12-31T15:20:00.000Z');assert.equal(parseScrimKoreanDate('10월 26일 20:00',now),'2026-10-26T11:00:00.000Z');assert.equal(parseScrimKoreanDate('02월 29일 20:00',now),'2028-02-29T11:00:00.000Z');for(const bad of ['02월 31일 20:00','10월 26일 25:00','2026-10-26','bad'])assert.throws(()=>parseScrimKoreanDate(bad,now));});
 test('recognizes only its command and component namespace',()=>{assert(isTeamScrimInteraction(interaction('etgp:list:0')));assert(!isTeamScrimInteraction(interaction('etg:join:1')));assert(isTeamScrimInteraction({...interaction(''),isChatInputCommand:()=>true,commandName:'스크림'}));});
 test('detail shows confirmation before posting an action with trusted Discord identity',async()=>{
@@ -80,4 +90,3 @@ test('participant can start a scrim from a schedule button and save imported res
  state.items[0].status='playing';state.items[0].run={gameStartedAt:'now',series:{sets:[{number:1,result:null}]}};
  const view=interaction('etgp:view:item');await handleTeamScrimInteraction(view,async()=>state,64);assert(JSON.stringify(view.outputs).includes('etgp:run:import-set:item'));
 });
-
