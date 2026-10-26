@@ -18,11 +18,11 @@ test('channels are inside the requested category and shared messages update with
  const calls=[],messages=new Map;let seq=0;const client={user:{id:'bot'},rest:{
   get:async path=>{calls.push(['GET',path]);if(path==='/channels/'+TEAM_SCRIM_CATEGORY)return {type:4,guild_id:guild};if(path==='/guilds/'+guild+'/channels')return [];if(path.includes('/messages?'))return [];throw Error(path);},
   post:async(path,{body})=>{calls.push(['POST',path,body]);const id=String(++seq);if(path.endsWith('/channels')){assert.equal(body.parent_id,TEAM_SCRIM_CATEGORY);assert.equal(body.type,0);}else{assert.deepEqual(body.allowed_mentions,{parse:[]});messages.set(id,body);}return {id};},
-  patch:async(path,{body})=>{calls.push(['PATCH',path,body]);return {};}
+  patch:async(path,{body})=>{calls.push(['PATCH',path,body]);return {};},delete:async path=>{calls.push(['DELETE',path]);}
  }};
  const result=await syncTeamScrimPanels(client,fixture());assert.equal(result.version,'team-scrims-v1');assert.equal(calls.filter(c=>c[0]==='POST'&&c[1].endsWith('/channels')).length,2);assert.equal(messages.size,3);
  const before=calls.length;await syncTeamScrimPanels(client,fixture());assert.equal(calls.length,before,'unchanged shared panels do not make REST writes');
- const changed=fixture();changed.items[0].guestTeam={id:'a',name:'상급1'};changed.items[0].status='confirmed';await syncTeamScrimPanels(client,changed);assert(calls.at(-1)[0]==='PATCH');
+ const changed=fixture();changed.items[0].guestTeam={id:'a',name:'상급1'};changed.items[0].status='confirmed';await syncTeamScrimPanels(client,changed);assert(calls.at(-1)[0]==='DELETE');
 });
 
 test('fixed recruitment dropdowns preserve AP, 24R, game count and ordered maps through modal submission',async()=>{
@@ -56,14 +56,21 @@ test('recruitment message exposes one direct challenge button and disables it af
  const item=fixture().items[0],open=teamScrimPostPayload(item);assert.equal(open.components[0].components[0].label,'맞짱 까기');assert.equal(open.components[0].components[0].custom_id,'etgp:challenge:item');assert.equal(open.components[0].components[0].disabled,false);
  const closed=teamScrimPostPayload({...item,status:'confirmed',guestTeam:{id:'a',name:'상급1'}});assert.equal(closed.components[0].components[0].disabled,true);assert.match(closed.embeds[0].title,/상급2 vs 상급1/);assert.deepEqual(open.allowed_mentions,{parse:[]});
 });
-test('individual posts survive restart without duplication and terminal states edit the same post',async()=>{
+test('individual posts survive restart without duplication and closed posts are deleted and stale snapshots cannot recreate them',async()=>{
  const channels=[{id:'guide',type:0,parent_id:TEAM_SCRIM_CATEGORY,name:'스크림-안내'},{id:'board',type:0,parent_id:TEAM_SCRIM_CATEGORY,name:'스크림-모집'}],messages=new Map,patches=[];let seq=0;
- const client={user:{id:'bot'},rest:{get:async path=>{if(path==='/channels/'+TEAM_SCRIM_CATEGORY)return {type:4,guild_id:guild};if(path==='/guilds/'+guild+'/channels')return channels;const channel=path.split('/')[2];return [...messages.values()].filter(m=>m.channel===channel).reverse();},post:async(path,{body})=>{const id=String(++seq);messages.set(id,{...body,id,channel:path.split('/')[2],author:{id:'bot'}});return {id};},patch:async(path,{body})=>{const id=path.split('/').at(-1);patches.push(id);Object.assign(messages.get(id),body);return {};}}};
+ const client={user:{id:'bot'},rest:{get:async path=>{if(path==='/channels/'+TEAM_SCRIM_CATEGORY)return {type:4,guild_id:guild};if(path==='/guilds/'+guild+'/channels')return channels;const channel=path.split('/')[2];return [...messages.values()].filter(m=>m.channel===channel).reverse();},post:async(path,{body})=>{const id=String(++seq);messages.set(id,{...body,id,channel:path.split('/')[2],author:{id:'bot'}});return {id};},patch:async(path,{body})=>{const id=path.split('/').at(-1);patches.push(id);Object.assign(messages.get(id),body);return {};},delete:async path=>{messages.delete(path.split('/').at(-1));}}};
  const state=fixture();state.items.push({...state.items[0],id:'second',hostTeam:{id:'c',name:'상급3'}});
  const initial=await import('../premier-scrims.mjs?posts-initial');await initial.syncTeamScrimPanels(client,state);assert.equal(messages.size,4);
  const posts=[...messages.values()].filter(m=>m.embeds?.[0].footer?.text.startsWith('ETG 스크림 모집글 · '));assert.equal(posts.length,2);const target=posts.find(m=>m.embeds[0].footer.text.endsWith('item')).id;
  const restarted=await import('../premier-scrims.mjs?posts-restarted');await restarted.syncTeamScrimPanels(client,state);assert.equal(messages.size,4);
- state.items[0]={...state.items[0],status:'cancelled',revision:5};await restarted.syncTeamScrimPanels(client,state);assert.equal(messages.size,4);assert.equal(messages.get(target).components[0].components[0].disabled,true);assert.match(messages.get(target).embeds[0].description,/취소/);
- await restarted.syncTeamScrimPanels(client,{items:[{...state.items[0],revision:4,status:'open'}]});assert.match(messages.get(target).embeds[0].description,/취소/);
+ state.items[0]={...state.items[0],status:'cancelled',revision:5};await restarted.syncTeamScrimPanels(client,state);assert.equal(messages.size,3);assert.equal(messages.has(target),false);
+ await restarted.syncTeamScrimPanels(client,{items:[{...state.items[0],revision:4,status:'open'}]});assert.equal(messages.has(target),false);
+});
+
+test('confirmed, cancelled, expired and completed recruitments are not posted',async()=>{
+ const mod=await import('../premier-scrims.mjs?closed-only'),state=fixture(),writes=[];
+ state.items=['confirmed','cancelled','expired','completed'].map((status,n)=>({...state.items[0],id:'closed-'+n,status}));
+ const client={user:{id:'bot'},rest:{get:async path=>path==='/channels/'+TEAM_SCRIM_CATEGORY?{type:4,guild_id:guild}:path==='/guilds/'+guild+'/channels'?[{id:'g',parent_id:TEAM_SCRIM_CATEGORY,type:0,name:'스크림-안내'},{id:'b',parent_id:TEAM_SCRIM_CATEGORY,type:0,name:'스크림-모집'}]:[],post:async(_,body)=>{writes.push(body.body);return {id:String(writes.length)};},patch:async()=>{},delete:async()=>{throw Error('nothing to delete');}}};
+ const result=await mod.syncTeamScrimPanels(client,state);assert.equal(writes.length,2);assert.equal(result.postCount,0);
 });
 

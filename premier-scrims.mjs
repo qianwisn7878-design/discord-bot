@@ -76,8 +76,8 @@ export async function handleTeamScrimInteraction(i,bridge,ephemeralFlag){
  }
  if(action==='execute'){
   if(!['join','withdraw','cancel','finish'].includes(parts[2]))throw Error('작업을 확인하세요.');
-  await request({action:parts[2],id:parts[3],revision:Number(parts[4])});
-  await reply({embeds:[embed('처리 완료',{join:'우리 팀의 스크림 대진이 확정되었습니다.',withdraw:'참여를 취소했습니다. 상대 팀은 다시 모집 중입니다.',cancel:'스크림 모집·대진을 취소했습니다.',finish:'스크림을 종료 처리했습니다.'}[parts[2]])],components:[row([btn('최신 목록','list:0'),link])]});return;
+  const result=await request({action:parts[2],id:parts[3],revision:Number(parts[4])});
+  await reply({embeds:[embed('처리 완료',{join:'우리 팀의 스크림 대진이 확정되었습니다.',withdraw:'참여를 취소했습니다. 상대 팀은 다시 모집 중입니다.',cancel:'스크림 모집·대진을 취소했습니다.',finish:'스크림을 종료 처리했습니다.'}[parts[2]])],components:[row([btn('최신 목록','list:0'),link])]});if(i.client)await syncTeamScrimPanels(i.client,{items:result.items});return;
  }
  const data=await request(),mine=data.myTeam?.id;
  if(action==='confirm'){
@@ -142,14 +142,19 @@ async function syncTeamScrimPanelsNow(client,data){
    panel.hash=hash;
   }
   for(const item of items){
-   let record=recruitmentPosts.get(item.id);if(!record&&!['open','confirmed'].includes(item.status))continue;
+   let record=recruitmentPosts.get(item.id);
    if(record&&(record.revision||0)>(item.revision||0))continue;
+   if(item.status!=='open'||Date.parse(item.startsAt)<=Date.now()){
+    if(record?.messageId){try{await client.rest.delete('/channels/'+panels.board.channelId+'/messages/'+record.messageId);}catch(error){if(error.status!==404)throw error;}}
+    recruitmentPosts.set(item.id,{messageId:null,revision:item.revision||0});continue;
+   }
+   if(record&&!record.messageId)record=null;
    const body=teamScrimPostPayload(item),hash=JSON.stringify(body);if(record?.hash===hash)continue;
    if(record?.messageId){try{await client.rest.patch('/channels/'+panels.board.channelId+'/messages/'+record.messageId,{body});}catch(error){if(error.status!==404)throw error;record=null;}}
-   if(!record){const post=await client.rest.post('/channels/'+panels.board.channelId+'/messages',{body:{...body,nonce:'etgp'+item.id.replaceAll('-','').slice(0,20),enforce_nonce:true}});record={messageId:post.id};}
+   if(!record){const post=await client.rest.post('/channels/'+panels.board.channelId+'/messages',{body:{...body,nonce:'etgp'+item.id.replaceAll('-','').slice(0,14)+'r'+(item.revision||0),enforce_nonce:true}});record={messageId:post.id};}
    recruitmentPosts.set(item.id,{...record,hash,revision:item.revision||0});
   }
-  return {guildId:panels.guildId,guideChannelId:panels.guide.channelId,boardChannelId:panels.board.channelId,version:'team-scrims-v1',publicationMode:'individual-posts-v1',postCount:recruitmentPosts.size};
+  return {guildId:panels.guildId,guideChannelId:panels.guide.channelId,boardChannelId:panels.board.channelId,version:'team-scrims-v1',publicationMode:'individual-posts-v1',postCount:[...recruitmentPosts.values()].filter(post=>post.messageId).length};
  }catch(error){panels=null;throw error;}
 }
 
