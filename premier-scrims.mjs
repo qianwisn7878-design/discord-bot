@@ -25,12 +25,16 @@ export async function handleTeamScrimInteraction(i,bridge,ephemeralFlag){
  const request=data=>bridge('/api/discord-bot/action',{guildId:i.guildId,userId:i.user.id,name:i.member?.displayName||i.user.globalName||i.user.username,interactionId:i.id,path:'/api/premier/scrims',method:data?'POST':'GET',...(data?{data}:{})});
  const parts=(i.customId||'etgp:list:0').split(':'),action=parts[1];
  if(action==='create'){
-  await i.showModal({custom_id:'etgp:submit',title:'우리 팀 스크림 상대 구하기',components:[['startsAt','경기 일정 · 한국 시간 (연도 자동)',1,true,20],['map','맵 · 예: 어센트 또는 협의',1,true,80],['note','모집 내용 · 희망 수준, 경기 수, 연락 방법',2,false,1000]].map(([id,label,style,required,max_length])=>row([{type:4,custom_id:id,label,style,required,max_length,...(id==='startsAt'?{placeholder:'01월 01일 00:20'}:{})}]))});return;
+  await i.reply({flags:ephemeralFlag,content:'맵 결정 방식을 선택하세요.',components:[row([btn('맵 지정 모집','create-mode:fixed'),btn('모집 후 맵 선택','create-mode:later'),btn('밴픽으로 결정','create-mode:veto')])]});return;
+ }
+ if(action==='create-mode'){
+  const mode=parts[2];if(mode==='veto'&&!parts[3]){await i.reply({flags:ephemeralFlag,content:'밴픽 경기 방식을 선택하세요.',components:[row([btn('BO1 · 단판','create-mode:veto:1'),btn('BO3 · 3전 2선승','create-mode:veto:3')])]});return;}if(!['fixed','later','veto'].includes(mode))throw Error('맵 결정 방식을 확인하세요.');
+  await i.showModal({custom_id:'etgp:submit:'+mode+':'+(parts[3]||1),title:'우리 팀 스크림 상대 구하기',components:[['startsAt','경기 일정 · 한국 시간 (연도 자동)',1,true,20],['map','맵 · 예: 어센트 또는 협의',1,true,80],['note','모집 내용 · 희망 수준, 경기 수, 연락 방법',2,false,1000]].filter(([id])=>id!=='map'||mode==='fixed').map(([id,label,style,required,max_length])=>row([{type:4,custom_id:id,label,style,required,max_length,...(id==='startsAt'?{placeholder:'01월 01일 00:20'}:{})}]))});return;
  }
  await i.deferReply({flags:ephemeralFlag});
  const reply=body=>i.editReply({content:'',embeds:[],components:[],allowedMentions:{parse:[]},...body});
  if(action==='submit'){
-  const data=await request({action:'create',startsAt:parseScrimKoreanDate(i.fields.getTextInputValue('startsAt').trim()),map:i.fields.getTextInputValue('map'),note:i.fields.getTextInputValue('note')});
+  const data=await request({action:'create',startsAt:parseScrimKoreanDate(i.fields.getTextInputValue('startsAt').trim()),mapMode:parts[2]||'fixed',bestOf:Number(parts[3]||1),map:parts[2]&&parts[2]!=='fixed'?'':i.fields.getTextInputValue('map'),note:i.fields.getTextInputValue('note')});
   await reply({embeds:[embed('모집 등록 완료',safe(data.myTeam.name)+' 팀의 모집을 홈페이지와 디스코드에 등록했습니다.')],components:[row([btn('모집 목록','list:0'),link])]});return;
  }
  if(action==='execute'){
@@ -54,6 +58,7 @@ export async function handleTeamScrimInteraction(i,bridge,ephemeralFlag){
   if(item.status==='confirmed'&&guest&&future)add('참여 취소','withdraw');
   if(['open','confirmed','expired'].includes(item.status)&&(host||data.canModerate))add('모집 취소','cancel');
   if(item.status==='confirmed'&&!future&&(host||guest||data.canModerate))add('경기 종료','finish');
+  if(item.status==='confirmed'&&(host||guest)&&(item.mapMode==='veto'||item.mapMode==='later'))buttons.push({type:2,style:5,label:'맵 선택·밴픽 진행',url:SITE});
   buttons.push(btn('최신 목록','list:0'),link);
   await reply({embeds:[embed((item.hostTeam.name+' vs '+(item.guestTeam?.name||'상대 모집 중')).slice(0,256),'**'+labels[item.status]+'** · '+when(item)+'\n맵: '+safe(item.map)+'\n\n'+safe(item.note||'추가 내용 없음'))],components:[row(buttons)]});return;
  }
@@ -83,7 +88,7 @@ export async function syncTeamScrimPanels(client,data){
   }
   const items=data.items||[],active=items.filter(item=>['open','confirmed'].includes(item.status));
   const payloads={
-   guide:{embeds:[{...embed('프리미어 팀 스크림 이용 안내','1. **상대 구하기**에서 한국 시간 일정·맵·모집 내용을 입력하세요.\n2. **모집 목록**에서 상대 팀의 글을 선택하고 **우리 팀으로 참여 → 확정**을 누르세요.\n3. 참여 취소·모집 취소·경기 종료도 같은 메뉴에서 할 수 있습니다.\n\n상급1·상급2·상급3처럼 현재 Discord 하위 팀 역할로 본인 팀을 확인합니다. 소속 팀으로만 모집·참여할 수 있고, 일정 전후 2시간 이내 중복 경기는 제한됩니다.\n\n`/스크림` 명령으로도 열 수 있습니다. 일정은 **01월 01일 00:20** 형식의 한국 시간(UTC+9)으로 입력합니다. 연도는 다가오는 날짜로 자동 적용되며 180일 이내 일정만 등록할 수 있습니다.'),footer:{text:'ETG 팀 스크림 · guide'}}],components:[row([btn('상대 구하기','create',1),btn('모집 목록','list:0'),link])]},
+   guide:{embeds:[{...embed('프리미어 팀 스크림 이용 안내','1. **상대 구하기**에서 한국 시간 일정·맵·모집 내용을 입력하세요.\n2. **모집 목록**에서 상대 팀의 글을 선택하고 **우리 팀으로 참여 → 확정**을 누르세요.\n3. 참여 취소·모집 취소·경기 종료도 같은 메뉴에서 할 수 있습니다.\n\n맵 지정 모집 / 모집 후 맵 선택 / 밴픽으로 결정 중 선택할 수 있습니다.\n\n`/스크림` 명령으로도 열 수 있습니다. 일정은 **01월 01일 00:20** 형식의 한국 시간(UTC+9)으로 입력합니다. 연도는 다가오는 날짜로 자동 적용되며 180일 이내 일정만 등록할 수 있습니다.'),footer:{text:'ETG 팀 스크림 · guide'}}],components:[row([btn('상대 구하기','create',1),btn('모집 목록','list:0'),link])]},
    board:{embeds:[{...embed('팀 스크림 모집판',active.length?active.slice(0,10).map(item=>'**'+safe(item.hostTeam.name)+' vs '+safe(item.guestTeam?.name||'상대 모집 중')+'**\n'+labels[item.status]+' · '+when(item)+' · '+safe(item.map)).join('\n\n')+'\n\n총 '+active.length+'건 · 목록에서 전체 모집을 확인하세요.':'현재 모집 중이거나 확정된 스크림이 없습니다. **상대 구하기**로 우리 팀의 모집을 시작하세요.'),footer:{text:'ETG 팀 스크림 · board'}}],components:[row([btn('모집 목록','list:0',1),btn('우리 팀 스크림','list:0:mine'),btn('+ 상대 구하기','create'),link])]}
   };
   for(const key of ['guide','board']){
@@ -95,3 +100,4 @@ export async function syncTeamScrimPanels(client,data){
   return {guildId:panels.guildId,guideChannelId:panels.guide.channelId,boardChannelId:panels.board.channelId,version:'team-scrims-v1'};
  }catch(error){panels=null;throw error;}finally{syncing=false;}
 }
+
