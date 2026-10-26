@@ -1,3 +1,4 @@
+import {syncGuildCommands} from './command-sync.mjs';
 import fs from 'node:fs';
 import {createInfoPanelRecovery} from './info-panels.mjs';
 import path from 'node:path';
@@ -60,7 +61,7 @@ export async function installLegacy(client,bridge,{members,content}){
     for(const file of ['rosters.json','gradeRosters.json','tierRosters.json']){const d=read(file);delete d.messageId;delete d.messageIds;write(file,d);}
     write('runtime.json',{...runtime,botId:client.user.id,migratedAt:new Date().toISOString()});
    }
-   for(const guildId of GUILDS){if(!client.guilds.cache.has(guildId))continue;const base='/applications/'+client.user.id+'/guilds/'+guildId+'/commands';const old=await client.rest.get(base);const removed=new Set(['기본역할','나랑맞짱까자','등급명단분류역할제거','등급명단분류역할추가','등급명단역할제거','등급명단역할추가','등급별채널지정','명단종류제거','명단전체제거','명단종류추가','역할제거','역할추가','티어명단제거','티어명단추가','티어투표','티어투표취소']);for(const command of old)if(removed.has(command.name))await client.rest.delete(base+'/'+command.id);for(const command of commands)await client.rest.post(base,{body:command});}
+   for(const guildId of GUILDS){if(!client.guilds.cache.has(guildId))continue;const base='/applications/'+client.user.id+'/guilds/'+guildId+'/commands';const removed=new Set(['기본역할','나랑맞짱까자','등급명단분류역할제거','등급명단분류역할추가','등급명단역할제거','등급명단역할추가','등급별채널지정','명단종류제거','명단전체제거','명단종류추가','역할제거','역할추가','티어명단제거','티어명단추가','티어투표','티어투표취소']);await syncGuildCommands(client,guildId,commands,{remove:[...removed]});}
    await flush();status.readyAt=new Date().toISOString();
   }catch(error){status.errors.push(error.message);console.error('[기존 명령어 준비] '+error.message);}
  });
@@ -96,4 +97,3 @@ export async function syncWebsiteRosters(client,boards,storage={read,write}){
   runtime.rosterBoards[board.key]={channelId:board.channelId,messageIds:next,hash,sourceVersion,sourceAt};storage.write('runtime.json',runtime);
  }
 }
-
