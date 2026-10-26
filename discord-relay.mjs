@@ -1,11 +1,12 @@
 import {STATIC_DISCORD_IDS} from './relay-policy.mjs';
+import {executeScrimVoice} from './scrim-voice-relay.mjs';
 const GUILDS=new Set(['1492461447568162876','1554439098490429442','1554439352652922891','1563217788288499813','1477820654739787858']);
 const outboundDMs=new Set();
 const publicChannel=name=>new Set(['📣・공지-소식','📝・모집-게시판','📅・일정-이벤트']).has(name)||String(name||'').includes('포인트-상점');
 const managedName=name=>/^(내전|스크림|[AB]팀)\s/.test(name||'');
 const forbiddenPermissions=8n|32n|268435456n|536870912n;
 export async function validateRelayJob(client,job){
- if(job.kind==='cleanup-voices')return;
+ if(job.kind==='cleanup-voices'||job.kind==='scrim-voice')return;
  if(job.kind!=='rest'||!['GET','POST','PATCH','PUT','DELETE'].includes(job.method)||typeof job.path!=='string'||job.path.length>2000||/[\\#]|%2f|%5c|\.\./i.test(job.path))throw Error('허용되지 않은 봇 작업입니다.');
  if(job.files?.length>2||job.files?.some(f=>typeof f.base64!=='string'||f.base64.length>2900000||!['image/png','image/jpeg','image/webp'].includes(f.type)))throw Error('허용되지 않은 첨부 파일입니다.');
  const path=job.path.split('?')[0],parts=path.split('/').filter(Boolean),body=job.body||{};
@@ -17,7 +18,7 @@ export async function validateRelayJob(client,job){
  }
  if(parts[0]==='guilds'){
   if(!GUILDS.has(parts[1]))throw Error('ETG 서버 외에는 접근할 수 없습니다.');
-  if(parts.length===2&&job.method==='GET')return;
+  if(parts.length===2&&job.method==='GET')return {prefetched:channel};
   if(parts[2]==='roles'){
    if(body.permissions!==undefined&&(BigInt(body.permissions)&forbiddenPermissions)!==0n)throw Error('관리자 권한 역할은 홈페이지에서 만들 수 없습니다.');
    if(parts[3]&&job.method==='DELETE'){const roles=await client.rest.get('/guilds/'+parts[1]+'/roles'),role=roles.find(r=>r.id===parts[3]);if(role&&(role.managed||(BigInt(role.permissions)&forbiddenPermissions)!==0n||!/^(초청|최상급|상급|중상급|중급|초급)\s*\d+$/.test(role.name)))throw Error('하위 팀 역할만 삭제할 수 있습니다.');}
@@ -36,7 +37,7 @@ export async function validateRelayJob(client,job){
   const channel=await client.rest.get('/channels/'+parts[1]);
   if(channel.type===1){if(parts[2]==='messages'&&job.method==='POST'&&outboundDMs.has(channel.id))return;throw Error('DM 조회·수정은 허용하지 않습니다.');}
   if(!GUILDS.has(channel.guild_id)||(!STATIC_DISCORD_IDS.has(channel.id)&&!managedName(channel.name)&&!publicChannel(channel.name)))throw Error('허용된 ETG 채널만 접근할 수 있습니다.');
-  if(parts.length===2&&job.method==='GET')return;
+  if(parts.length===2&&job.method==='GET')return {prefetched:channel};
   if(parts.length===2&&job.method==='DELETE'&&[0,2].includes(channel.type)&&managedName(channel.name))return;
   if(parts[2]==='messages'&&parts.length<=4){if(parts[3]&&['PATCH','DELETE'].includes(job.method)){const message=await client.rest.get('/channels/'+parts[1]+'/messages/'+parts[3]);if(message.author?.id!==client.user.id)throw Error('봇이 작성한 메시지만 수정·삭제할 수 있습니다.');}return;}
   if(parts[2]==='invites'&&job.method==='POST'&&channel.type===2&&managedName(channel.name))return;
@@ -54,6 +55,20 @@ async function cleanupVoices(client,job){
  for(const id of targets)await client.rest.delete('/channels/'+id);
  return {ok:true};
 }
-export async function executeRelayJob(client,job){try{await validateRelayJob(client,job);if(job.kind==='cleanup-voices')return {status:200,body:await cleanupVoices(client,job)};const files=(job.files||[]).map(f=>({data:Buffer.from(f.base64,'base64'),name:f.name,contentType:f.type})),options={...(job.body?{body:job.body}:{}),...(files.length?{files}:{})};let body=await client.rest[job.method.toLowerCase()](job.path,options);if(job.path==='/users/@me/channels'&&body?.id)outboundDMs.add(body.id);if(job.path==='/oauth2/applications/@me')body={id:body.id,flags:body.flags,flags_new:body.flags_new};return {status:job.method==='DELETE'?204:200,body:body??null};}catch(error){return {status:Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:403,body:{message:String(error.rawError?.message||error.message||'봇 작업 실패').slice(0,250),code:typeof error.code==='number'?error.code:undefined}};}}
-export function installDiscordRelay(client,bridge){let running=false,stopped=false,nextAt=0;client.relayStatus={ready:false,processed:0,lastAt:null};const results=new Map();const tick=async()=>{if(running||stopped||!client.isReady()||Date.now()<nextAt)return;running=true;try{const {jobs=[]}=await bridge('/api/discord-bot/relay/poll');client.relayStatus.ready=true;await Promise.all(jobs.map(async job=>{let result=results.get(job.id);if(!result){result=await executeRelayJob(client,job);results.set(job.id,result);while(results.size>16)results.delete(results.keys().next().value);}await bridge('/api/discord-bot/relay/result',{id:job.id,key:job.key,lease:job.lease,...result});client.relayStatus.processed++;client.relayStatus.lastAt=new Date().toISOString();}));}catch{nextAt=Date.now()+5000;client.relayStatus.ready=false;}finally{running=false;}};const timer=setInterval(tick,1000);timer.unref();return {stop(){stopped=true;clearInterval(timer);}};}
-
+export async function executeRelayJob(client,job){try{const validated=await validateRelayJob(client,job);if(job.kind==='scrim-voice')return {status:200,body:await executeScrimVoice(client,job)};if(job.kind==='cleanup-voices')return {status:200,body:await cleanupVoices(client,job)};const files=(job.files||[]).map(f=>({data:Buffer.from(f.base64,'base64'),name:f.name,contentType:f.type})),options={...(job.body?{body:job.body}:{}),...(files.length?{files}:{})};let body=validated?.prefetched||await client.rest[job.method.toLowerCase()](job.path,options);if(job.path==='/users/@me/channels'&&body?.id)outboundDMs.add(body.id);if(job.path==='/oauth2/applications/@me')body={id:body.id,flags:body.flags,flags_new:body.flags_new};return {status:job.method==='DELETE'?204:200,body:body??null};}catch(error){return {status:Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:403,body:{message:String(error.rawError?.message||error.message||'봇 작업 실패').slice(0,250),code:typeof error.code==='number'?error.code:undefined}};}}
+export function installDiscordRelay(client,bridge,{idleMs=1000,retryMs=5000}={}){
+ let running=false,stopped=false,timer=null,timerAt=Infinity,wakeRequested=false;
+ const inflight=new Map(),completed=new Map(),results=new Map();
+ client.relayStatus={ready:false,processed:0,lastAt:null,transport:'exchange-v1'};
+ function schedule(ms){if(stopped)return;const at=Date.now()+ms;if(timer&&timerAt<=at)return;clearTimeout(timer);timerAt=at;timer=setTimeout(()=>{timer=null;timerAt=Infinity;void tick();},ms);timer.unref?.();}
+ function wake(){if(running)wakeRequested=true;else schedule(0);}
+ async function execute(job){try{let result=results.get(job.id);if(!result){result=await executeRelayJob(client,job);results.set(job.id,result);while(results.size>16)results.delete(results.keys().next().value);}completed.set(job.id,{id:job.id,key:job.key,lease:job.lease,...result});}finally{inflight.delete(job.id);wake();}}
+ async function tick(){if(running||stopped)return;if(!client.isReady()){schedule(idleMs);return;}if(inflight.size===4&&!completed.size){schedule(idleMs);return;}running=true;wakeRequested=false;let delay=idleMs;
+  try{const sending=[...completed.values()].slice(0,4),{jobs=[]}=await bridge('/api/discord-bot/relay/exchange',{results:sending,capacity:4-inflight.size});for(const result of sending){completed.delete(result.id);client.relayStatus.processed++;client.relayStatus.lastAt=new Date().toISOString();}client.relayStatus.ready=true;
+   for(const job of jobs){if(inflight.has(job.id))continue;inflight.set(job.id,job);void execute(job);}
+  }catch{client.relayStatus.ready=false;delay=retryMs;wakeRequested=false;}
+  finally{running=false;schedule(wakeRequested?0:delay);}
+ }
+ schedule(0);console.log('[봇 중계] exchange-v1 준비');
+ return {stop(){stopped=true;clearTimeout(timer);}};
+}
