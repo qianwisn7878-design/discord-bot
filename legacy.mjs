@@ -6,6 +6,8 @@ import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),root=fileURLToPath(new URL('./legacy/',import.meta.url)),dataDir=path.join(root,'data');
 const GUILDS=new Set(['1492461447568162876','1477820654739787858']),OWNER='794026986002448414',MANAGER='1515403509103722627';
 const FILES=['activityTimeMessage.json','ageMessage.json','phoneMessage.json','genderMessage.json','gradeRosters.json','rosterMembers.json','rosters.json','termsMessages.json','tierMessage.json','tierRosters.json','userInfo.json','google-service-account.json','valorantNicknameMessage.json','runtime.json'];
+const SENSITIVE_FILES=new Set(['userInfo.json','google-service-account.json']);
+export function legacyBackupFiles(names){return names.filter(name=>!SENSITIVE_FILES.has(name));}
 export function legacyCapabilities(flags){const bits=BigInt(flags||0);return {members:!!(bits&((1n<<14n)|(1n<<15n))),content:!!(bits&((1n<<18n)|(1n<<19n)))};}
 export function isLegacyInteraction(i,names){return i.isChatInputCommand()?names.has(i.commandName):/^(age_select_|gender_|valorant_nickname_|activity_time_|tier_select_|tier_grade_|tier_back$|phone_)/.test(i.customId||'');}
 export function mayUseLegacyCommand(i){
@@ -18,14 +20,16 @@ export async function installLegacy(client,bridge,{members,content}){
  let rosterQueue=Promise.resolve();let snapshot=await bridge('/api/discord-bot/legacy-state'),version=snapshot.version,lastSaved='',saving=null;
  if(!snapshot.rawFiles||!Number.isSafeInteger(version))throw Error('기존 봇 데이터 백업을 확인할 수 없습니다.');
  fs.mkdirSync(dataDir,{recursive:true});
- for(const file of FILES)if(Object.hasOwn(snapshot.rawFiles,file)){const target=file==='google-service-account.json'?path.join(root,file):path.join(dataDir,file);fs.writeFileSync(target,Buffer.from(snapshot.rawFiles[file],'base64'),{mode:0o600});}
- const status={pending:[],version:'legacy-migration-v1',commands:2,systems:15,removed:['티어 투표','맞짱','역할·명단 편집 명령'],missingIntents:[...(!members?['Server Members Intent']:[]),...(!content?['Message Content Intent']:[])],errors:[],backupAt:null};
- const filePath=f=>f==='google-service-account.json'?path.join(root,f):path.join(dataDir,f);const files=()=>Object.fromEntries(FILES.filter(f=>fs.existsSync(filePath(f))).map(f=>[f,fs.readFileSync(filePath(f)).toString('base64')]));
+ for(const file of FILES)if(Object.hasOwn(snapshot.rawFiles,file)){const target=file==='google-service-account.json'?path.join(root,file):path.join(dataDir,file);if(SENSITIVE_FILES.has(file)&&fs.existsSync(target)&&fs.statSync(target).size>0)continue;fs.writeFileSync(target,Buffer.from(snapshot.rawFiles[file],'base64'),{mode:0o600});}
+ const localPersonalData=fs.existsSync(path.join(dataDir,'userInfo.json'))&&fs.statSync(path.join(dataDir,'userInfo.json')).size>0,localGoogleKey=fs.existsSync(path.join(root,'google-service-account.json'))&&fs.statSync(path.join(root,'google-service-account.json')).size>0;
+ if(snapshot.sensitiveRemovedAt&&(!localPersonalData||!localGoogleKey))throw Error('호스팅 백업에서 개인정보 파일과 구글 인증키를 복원해야 합니다. 홈페이지에는 사본이 없습니다.');
+ const status={storageMode:'local-sensitive-v1',localPersonalData,localGoogleKey,remoteSensitiveBackupDisabled:true,pending:[],version:'legacy-migration-v1',commands:2,systems:15,removed:['티어 투표','맞짱','역할·명단 편집 명령'],missingIntents:[...(!members?['Server Members Intent']:[]),...(!content?['Message Content Intent']:[])],errors:[],backupAt:null};
+ const filePath=f=>f==='google-service-account.json'?path.join(root,f):path.join(dataDir,f);const files=()=>Object.fromEntries(legacyBackupFiles(FILES).filter(f=>fs.existsSync(filePath(f))).map(f=>[f,fs.readFileSync(filePath(f)).toString('base64')]));
  lastSaved=JSON.stringify(files());
  const flush=async()=>{
   if(saving)return saving;
   const state=files(),encoded=JSON.stringify(state);if(encoded===lastSaved)return;
-  saving=(async()=>{const result=await bridge('/api/discord-bot/legacy-state',{version,rawFiles:state});version=result.version;lastSaved=encoded;status.backupAt=new Date().toISOString();})();
+  saving=(async()=>{let result;try{result=await bridge('/api/discord-bot/legacy-state',{version,rawFiles:state});}catch(error){if(error.status!==409)throw error;const latest=await bridge('/api/discord-bot/legacy-state');if(!latest.sensitiveRemovedAt||snapshot.sensitiveRemovedAt)throw error;snapshot=latest;version=latest.version;result=await bridge('/api/discord-bot/legacy-state',{version,rawFiles:state});}version=result.version;lastSaved=encoded;status.backupAt=new Date().toISOString();})();
   try{await saving;}finally{saving=null;}
  };
  const scoped=Object.create(client),names=new Set();scoped.__legacyBridge=bridge;scoped.__legacyStatus=status;

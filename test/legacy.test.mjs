@@ -1,6 +1,6 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {Client,GatewayIntentBits,Collection} from 'discord.js';
-import {installLegacy,legacyCapabilities,isLegacyInteraction,mayUseLegacyCommand} from '../legacy.mjs';
+import {installLegacy,legacyBackupFiles,legacyCapabilities,isLegacyInteraction,mayUseLegacyCommand} from '../legacy.mjs';
 test('privileged intents are only requested when Discord reports them enabled',()=>{assert.deepEqual(legacyCapabilities(0),{members:false,content:false});assert.deepEqual(legacyCapabilities((1<<15)|(1<<19)),{members:true,content:true});assert.deepEqual(legacyCapabilities(1<<14),{members:true,content:false});});
 test('legacy routing does not consume current helper commands or shared buttons',()=>{const names=new Set(['기본역할']),i={isChatInputCommand:()=>true,commandName:'기본역할'};assert(isLegacyInteraction(i,names));assert(!isLegacyInteraction({...i,commandName:'스크림'},names));assert(!isLegacyInteraction({isChatInputCommand:()=>false,customId:'etgp:create'},names));assert(isLegacyInteraction({isChatInputCommand:()=>false,customId:'age_select_00'},names));});
 test('administrative legacy commands require owner, manager or manage-server access',()=>{const i={isChatInputCommand:()=>true,commandName:'정보추가',user:{id:'outsider'},member:{roles:{cache:new Collection}},memberPermissions:{has:()=>false}};assert.equal(mayUseLegacyCommand(i),false);assert(mayUseLegacyCommand({...i,user:{id:'794026986002448414'}}));i.member.roles.cache.set('1515403509103722627',{});assert(mayUseLegacyCommand(i));});
@@ -14,3 +14,6 @@ test('only information commands remain and personal replies are private',async()
  client.emit('interactionCreate',i);await new Promise(r=>setImmediate(r));assert.match(i.replyBody.content,/유저/);assert.equal(i.replyBody.flags,64);assert.equal(posts,0);
  await legacy.stop();client.destroy();
 });
+
+test('personal records and Google private key never enter website backup uploads',()=>{assert.deepEqual(legacyBackupFiles(['userInfo.json','rosters.json','google-service-account.json','runtime.json']),['rosters.json','runtime.json']);});
+
