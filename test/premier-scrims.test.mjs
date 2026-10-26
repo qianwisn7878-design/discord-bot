@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {isTeamScrimInteraction,handleTeamScrimInteraction,parseScrimKoreanDate,syncTeamScrimPanels,TEAM_SCRIM_CATEGORY} from '../premier-scrims.mjs';
 const guild='1492461447568162876',user='111111111111111111';
-const fixture=()=>({myTeam:{id:'a',name:'상급1'},items:[{id:'item',revision:4,hostTeam:{id:'b',name:'상급2'},guestTeam:null,status:'open',startsAt:new Date(Date.now()+86400000).toISOString(),map:'협의',note:'연습',createdAt:new Date().toISOString()}]});
+const fixture=()=>({mapPool:['바인드','어센트','스플릿'],myTeam:{id:'a',name:'상급1'},items:[{id:'item',revision:4,hostTeam:{id:'b',name:'상급2'},guestTeam:null,status:'open',startsAt:new Date(Date.now()+86400000).toISOString(),map:'협의',note:'연습',createdAt:new Date().toISOString()}]});
 function interaction(id){const result={id:'222222222222222222',guildId:guild,user:{id:user,username:'user'},customId:id,outputs:[],reply:async data=>{result.outputs.push(data);},isChatInputCommand:()=>false,isButton:()=>true,isStringSelectMenu:()=>false,isModalSubmit:()=>false,deferReply:async data=>{result.flags=data.flags;},editReply:async data=>{result.outputs.push(data);},showModal:async data=>{result.modal=data;}};return result;}
 test('Korean dates infer the next year and reject invalid calendar days',()=>{const now=Date.parse('2026-10-25T11:00:00Z');assert.equal(parseScrimKoreanDate('01월 01일 00:20',now),'2026-12-31T15:20:00.000Z');assert.equal(parseScrimKoreanDate('10월 26일 20:00',now),'2026-10-26T11:00:00.000Z');assert.equal(parseScrimKoreanDate('02월 29일 20:00',now),'2028-02-29T11:00:00.000Z');for(const bad of ['02월 31일 20:00','10월 26일 25:00','2026-10-26','bad'])assert.throws(()=>parseScrimKoreanDate(bad,now));});
 test('recognizes only its command and component namespace',()=>{assert(isTeamScrimInteraction(interaction('etgp:list:0')));assert(!isTeamScrimInteraction(interaction('etg:join:1')));assert(isTeamScrimInteraction({...interaction(''),isChatInputCommand:()=>true,commandName:'스크림'}));});
@@ -12,11 +12,6 @@ test('detail shows confirmation before posting an action with trusted Discord id
  i=interaction('etgp:confirm:join:item:4');await handleTeamScrimInteraction(i,bridge,64);assert(calls.every(c=>c.method==='GET'));assert(i.outputs[0].components[0].components.some(b=>b.custom_id==='etgp:execute:join:item:4'));
  i=interaction('etgp:execute:join:item:4');await handleTeamScrimInteraction(i,bridge,64);assert.deepEqual(calls.at(-1).data,{action:'join',id:'item',revision:4});assert.deepEqual(i.outputs[0].allowedMentions,{parse:[]});
  await assert.rejects(()=>handleTeamScrimInteraction(interaction('etgp:confirm:join:item:3'),bridge,64),/변경/);
-});
-test('modal acknowledges immediately and submits fields to the shared API',async()=>{
- const menu=interaction('etgp:create');await handleTeamScrimInteraction(menu,()=>{},64);assert.equal(menu.outputs[0].components[0].components.length,3);const i=interaction('etgp:create-mode:fixed');await handleTeamScrimInteraction(i,()=>{throw Error('should not fetch before modal');},64);assert.equal(i.modal.custom_id,'etgp:submit:fixed:1');assert.equal(i.modal.components[0].components[0].placeholder,'01월 01일 00:20');assert.equal(i.flags,undefined);
- const submit=interaction('etgp:submit');submit.fields={getTextInputValue:key=>({startsAt:'01월 01일 00:20',map:'어센트',note:'연습'}[key])};let captured;
- await handleTeamScrimInteraction(submit,async(path,body)=>{captured=body;return fixture();},64);assert.equal(captured.data.action,'create');assert.equal(captured.data.startsAt,parseScrimKoreanDate('01월 01일 00:20'));assert.equal(captured.userId,user);
 });
 test('list pagination and absent team hide creation controls',async()=>{const data=fixture();data.myTeam=null;data.items=Array.from({length:26},(_,n)=>({...data.items[0],id:String(n)}));const i=interaction('etgp:list:0');await handleTeamScrimInteraction(i,async()=>data,64);assert.equal(i.outputs[0].components[0].components[0].options.length,25);assert(!JSON.stringify(i.outputs).includes('etgp:create'));assert(JSON.stringify(i.outputs).includes('etgp:list:25:active'));});
 test('channels are inside the requested category and shared messages update without duplicates',async()=>{
@@ -30,5 +25,25 @@ test('channels are inside the requested category and shared messages update with
  const changed=fixture();changed.items[0].guestTeam={id:'a',name:'상급1'};changed.items[0].status='confirmed';await syncTeamScrimPanels(client,changed);assert(calls.at(-1)[0]==='PATCH');
 });
 
-test('veto creation offers BO1 and BO3 and submits no map field',async()=>{const i=interaction('etgp:create-mode:veto');await handleTeamScrimInteraction(i,()=>{},64);assert.deepEqual(i.outputs[0].components[0].components.map(b=>b.custom_id),['etgp:create-mode:veto:1','etgp:create-mode:veto:3']);const modal=interaction('etgp:create-mode:veto:3');await handleTeamScrimInteraction(modal,()=>{},64);assert.equal(modal.modal.custom_id,'etgp:submit:veto:3');assert.equal(modal.modal.components.length,2);const submit=interaction('etgp:submit:veto:3');submit.fields={getTextInputValue:key=>{assert.notEqual(key,'map');return key==='startsAt'?'01월 01일 00:20':'';}};let captured;await handleTeamScrimInteraction(submit,async(_,body)=>{captured=body.data;return fixture();},64);assert.equal(captured.bestOf,3);assert.equal(captured.mapMode,'veto');});
+test('fixed recruitment dropdowns preserve AP, 24R, game count and ordered maps through modal submission',async()=>{
+ const captured=[],bridge=async(_,body)=>{if(body.data)captured.push(body.data);return fixture();};
+ const start=interaction('etgp:create-mode:fixed');await handleTeamScrimInteraction(start,bridge,64);const id=start.outputs[0].components[0].components[0].custom_id.split(':')[2];
+ for(const [field,value] of [['region','AP'],['rounds','24'],['count','2']]){const i=interaction('etgp:draft-option:'+id+':'+field);i.values=[value];await handleTeamScrimInteraction(i,bridge,64);}
+ const next=interaction('etgp:draft-next:'+id);await handleTeamScrimInteraction(next,bridge,64);assert.equal(next.outputs[0].components[0].components[0].options.length,3);
+ for(const value of ['어센트','스플릿']){const i=interaction('etgp:draft-map:'+id);i.values=[value];await handleTeamScrimInteraction(i,bridge,64);}
+ const modal=interaction('etgp:draft-modal:'+id);await handleTeamScrimInteraction(modal,bridge,64);assert.equal(modal.modal.components[0].components[0].placeholder,'01월 01일 00:20');
+ const submit=interaction(modal.modal.custom_id);submit.fields={getTextInputValue:key=>key==='startsAt'?'01월 01일 00:20':'연습'};await handleTeamScrimInteraction(submit,bridge,64);
+ assert.deepEqual(captured[0].maps,['어센트','스플릿']);assert.equal(captured[0].region,'AP');assert.equal(captured[0].rounds,24);assert.equal(captured[0].matchCount,2);
+});
+test('veto setup restricts dropdown to BO1 and BO3; expired or foreign drafts cannot be submitted',async()=>{
+ const i=interaction('etgp:create-mode:veto');await handleTeamScrimInteraction(i,async()=>fixture(),64);const menu=i.outputs[0].components[2].components[0];assert.deepEqual(menu.options.map(o=>o.value),['1','3']);
+ const id=menu.custom_id.split(':')[2],other=interaction('etgp:draft-modal:'+id);other.user.id='another';await assert.rejects(()=>handleTeamScrimInteraction(other,async()=>fixture(),64),/만료/);
+ const select=interaction(menu.custom_id);select.values=['3'];await handleTeamScrimInteraction(select,async()=>fixture(),64);const modal=interaction('etgp:draft-modal:'+id);await handleTeamScrimInteraction(modal,async()=>fixture(),64);const submit=interaction(modal.modal.custom_id);submit.fields={getTextInputValue:key=>key==='startsAt'?'01월 01일 00:20':''};let saved;await handleTeamScrimInteraction(submit,async(_,body)=>{saved=body.data;return fixture();},64);assert.equal(saved.bestOf,3);assert.equal(saved.mapMode,'veto');
+});
+test('confirmed unspecified recruitment selects every game map with Discord dropdowns',async()=>{
+ const data=fixture();Object.assign(data.items[0],{mapMode:'later',status:'confirmed',matchCount:2,guestTeam:{id:'a',name:'상급1'}});let saved;const bridge=async(_,body)=>{if(body.data)saved=body.data;return data;};
+ const first=interaction('etgp:map-start:item');await handleTeamScrimInteraction(first,bridge,64);let id=first.outputs[0].components[0].components[0].custom_id;
+ for(const value of ['어센트','바인드']){const i=interaction(id);i.values=[value];await handleTeamScrimInteraction(i,bridge,64);}
+ assert.deepEqual(saved.maps,['어센트','바인드']);assert.equal(saved.action,'choose-map');
+});
 
