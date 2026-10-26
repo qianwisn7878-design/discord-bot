@@ -74,3 +74,10 @@ test('confirmed, cancelled, expired and completed recruitments are not posted',a
  const result=await mod.syncTeamScrimPanels(client,state);assert.equal(writes.length,2);assert.equal(result.postCount,0);
 });
 
+test('participant can start a scrim from a schedule button and save imported results through the same bridge',async()=>{
+ const state=fixture();state.items[0].guestTeam=state.myTeam;state.items[0].status='confirmed';let saved;
+ const i=interaction('etgp:run:start:item');await handleTeamScrimInteraction(i,async(_,body)=>{if(body.data)saved=body.data;return state;},64);assert.deepEqual(saved,{action:'start',id:'item',revision:4});assert.match(i.outputs[0].content,/시작/);
+ state.items[0].status='playing';state.items[0].run={gameStartedAt:'now',series:{sets:[{number:1,result:null}]}};
+ const view=interaction('etgp:view:item');await handleTeamScrimInteraction(view,async()=>state,64);assert(JSON.stringify(view.outputs).includes('etgp:run:import-set:item'));
+});
+

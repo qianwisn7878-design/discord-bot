@@ -3,7 +3,7 @@ const scrimDrafts=new Map();
 export const TEAM_SCRIM_CATEGORY='1523985107881300038';
 const GUILDS=new Set(['1554439098490429442','1492461447568162876','1554439352652922891']);
 const SITE='https://enjoythegame.craftyamber8.chatgpt.site/home#premier';
-const labels={open:'모집 중',confirmed:'대진 확정',completed:'종료',cancelled:'취소',expired:'모집 마감'};
+const labels={open:'모집 중',confirmed:'대진 확정',playing:'진행 중',completed:'종료',cancelled:'취소',expired:'모집 마감'};
 export const teamScrimCommand={name:'스크림',description:'프리미어 팀 스크림을 모집하거나 상대 팀에 참여합니다.',type:1};
 const row=components=>({type:1,components});
 const btn=(label,id,style=2)=>({type:2,label,custom_id:'etgp:'+id,style});
@@ -58,7 +58,7 @@ export async function handleTeamScrimInteraction(i,bridge,ephemeralFlag){
   await reply({content:'모집 등록 완료 · '+data.myTeam.name,components:[row([btn('모집 목록','list:0'),link])]});if(i.client)await syncTeamScrimPanels(i.client,{items:data.items});return;
  }
  if(action==='map-start'||action==='map-choose'){
-  const data=await request(),item=data.items.find(item=>item.id===parts[2]);if(!item||item.mapMode!=='later'||item.mapChosen||item.status!=='confirmed'||![item.hostTeam.id,item.guestTeam?.id].includes(data.myTeam?.id))throw Error('참여 팀의 미지정 스크림을 선택하세요.');
+  const data=await request(),item=data.items.find(item=>item.id===parts[2]);if(!item||item.mapMode!=='later'||item.mapChosen||!['confirmed','playing'].includes(item.status)||![item.hostTeam.id,item.guestTeam?.id].includes(data.myTeam?.id))throw Error('참여 팀의 미지정 스크림을 선택하세요.');
   let d;if(action==='map-start'){d={id:randomUUID(),userId:i.user.id,until:Date.now()+1800000,itemId:item.id,revision:item.revision,count:item.matchCount||1,index:0,maps:[],allMaps:data.mapPool||[]};scrimDrafts.set(d.id,d);}else{d=getDraft(parts[3]);if(d.itemId!==item.id||d.revision!==item.revision)throw Error('모집 상태가 변경됐습니다. 다시 선택하세요.');if(!d.allMaps.includes(i.values[0]))throw Error('맵을 확인하세요.');d.maps[d.index++]=i.values[0];}
   if(d.maps.length===d.count){await request({action:'choose-map',id:item.id,revision:d.revision,maps:d.maps});scrimDrafts.delete(d.id);await reply({content:'경기별 맵을 확정했습니다.',components:[row([btn('상세 보기','view:'+item.id)])]});return;}
   await reply({content:(d.index+1)+'경기 맵을 선택하세요.',components:[select('etgp:map-choose:'+item.id+':'+d.id,'맵 선택',d.allMaps.map(name=>[name,name]))]});return;
@@ -66,6 +66,13 @@ export async function handleTeamScrimInteraction(i,bridge,ephemeralFlag){
  if(action==='submit'){
   const data=await request({action:'create',startsAt:parseScrimKoreanDate(i.fields.getTextInputValue('startsAt').trim()),mapMode:parts[2]||'fixed',bestOf:Number(parts[3]||1),map:parts[2]&&parts[2]!=='fixed'?'':i.fields.getTextInputValue('map'),note:i.fields.getTextInputValue('note')});
   await reply({embeds:[embed('모집 등록 완료',safe(data.myTeam.name)+' 팀의 모집을 홈페이지와 디스코드에 등록했습니다.')],components:[row([btn('모집 목록','list:0'),link])]});return;
+ }
+ if(action==='run'){
+  if(!['start','begin-match','join-voice','import-set','next-set','finish'].includes(parts[2]))throw Error('진행 작업을 확인하세요.');
+  const state=await request(),item=state.items.find(item=>item.id===parts[3]);if(!item)throw Error('스크림을 찾을 수 없습니다.');
+  const result=await request({action:parts[2],id:item.id,revision:item.revision});
+  await reply({content:{start:'스크림을 시작했습니다. 대기실에 입장하세요.','begin-match':'팀 음성방으로 이동하고 경기를 시작했습니다.','join-voice':'스크림 대기실에 입장하세요.','import-set':'경기 전적을 저장했습니다.','next-set':'다음 경기를 시작했습니다.',finish:'스크림 기록을 저장하고 마무리했습니다.'}[parts[2]],components:[row([...(result.voiceResult?.url?[{type:2,style:5,label:'대기실 입장',url:result.voiceResult.url}]:[]),btn('상세 보기','view:'+item.id),link])]});
+  if(i.client)await syncTeamScrimPanels(i.client,{items:result.items});return;
  }
  if(action==='challenge'){
   const state=await request(),item=state.items.find(item=>item.id===parts[2]);
@@ -94,13 +101,14 @@ export async function handleTeamScrimInteraction(i,bridge,ephemeralFlag){
   if(item.status==='open'&&mine&&!host&&future)add('우리 팀으로 참여','join');
   if(item.status==='confirmed'&&guest&&future)add('참여 취소','withdraw');
   if(['open','confirmed','expired'].includes(item.status)&&(host||data.canModerate))add('모집 취소','cancel');
-  if(item.status==='confirmed'&&!future&&(host||guest||data.canModerate))add('경기 종료','finish');
-  if(item.status==='confirmed'&&(host||guest)&&item.mapMode==='later'&&!item.mapChosen)buttons.push(btn('경기별 맵 선택','map-start:'+item.id));
-  if(item.status==='confirmed'&&(host||guest)&&item.mapMode==='veto')buttons.push({type:2,style:5,label:'맵 선택·밴픽 진행',url:SITE});
+  if(item.status==='confirmed'&&(host||guest))buttons.push(btn('스크림 시작하기','run:start:'+item.id));
+  if(item.status==='playing'&&(host||guest)){buttons.push(btn('대기실 입장','run:join-voice:'+item.id));if(!item.run?.gameStartedAt)buttons.push(btn('경기 시작','run:begin-match:'+item.id));else{const current=item.run.series?.sets?.at(-1);if(!current?.result)buttons.push(btn('전적 불러오기','run:import-set:'+item.id));else buttons.push(btn(item.run.done?'스크림 마무리':'다음 경기','run:'+(item.run.done?'finish':'next-set')+':'+item.id));}}
+  if(['confirmed','playing'].includes(item.status)&&(host||guest)&&item.mapMode==='later'&&!item.mapChosen)buttons.push(btn('경기별 맵 선택','map-start:'+item.id));
+  if(['confirmed','playing'].includes(item.status)&&(host||guest)&&item.mapMode==='veto')buttons.push({type:2,style:5,label:'맵 선택·밴픽 진행',url:SITE});
   buttons.push(btn('최신 목록','list:0'),link);
-  await reply({embeds:[embed((item.hostTeam.name+' vs '+(item.guestTeam?.name||'상대 모집 중')).slice(0,256),'**'+labels[item.status]+'** · '+when(item)+'\n'+(item.region||'KR')+' · '+(item.rounds||13)+'R · '+(item.mapMode==='veto'?'BO'+(item.bestOf||1):(item.matchCount||1)+'판')+'\n맵: '+safe(item.map)+'\n\n'+safe(item.note||'추가 내용 없음'))],components:Array.from({length:Math.ceil(buttons.length/5)},(_,n)=>row(buttons.slice(n*5,n*5+5)))});return;
+  await reply({embeds:[embed((item.hostTeam.name+' vs '+(item.guestTeam?.name||'상대 모집 중')).slice(0,256),'**'+labels[item.status]+'** · '+when(item)+'\n'+(item.region||'KR')+' · '+(item.rounds||13)+'R · '+(item.mapMode==='veto'?'BO'+(item.bestOf||1):(item.matchCount||1)+'판')+'\n맵: '+safe(item.map)+'\n\n'+safe(item.note||'추가 내용 없음')+(item.record?'\n\n**저장된 스크림 기록**\n'+(item.run?.series?.sets||[]).filter(s=>s.result).map(s=>s.number+'경기 · '+s.result.map+' · '+s.result.scores.a+' : '+s.result.scores.b).join('\n'):''))],components:Array.from({length:Math.ceil(buttons.length/5)},(_,n)=>row(buttons.slice(n*5,n*5+5)))});return;
  }
- const mode=parts[3]==='mine'?'mine':'active',items=data.items.filter(item=>mode==='mine'?[item.hostTeam.id,item.guestTeam?.id].includes(mine):['open','confirmed'].includes(item.status)),offset=Math.max(0,Number(parts[2])||0),shown=items.slice(offset,offset+25),components=[];
+ const mode=parts[3]==='mine'?'mine':'active',items=data.items.filter(item=>mode==='mine'?[item.hostTeam.id,item.guestTeam?.id].includes(mine):['open','confirmed','playing'].includes(item.status)),offset=Math.max(0,Number(parts[2])||0),shown=items.slice(offset,offset+25),components=[];
  if(shown.length)components.push(row([{type:3,custom_id:'etgp:pick',placeholder:'모집 글을 선택하세요',options:shown.map(item=>({label:(item.hostTeam.name+' vs '+(item.guestTeam?.name||'상대 모집 중')).slice(0,100),value:item.id,description:(labels[item.status]+' · '+new Date(item.startsAt).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'})+' · '+item.map).slice(0,100)}))}]));
  const buttons=[btn('새로고침','list:0:'+mode),btn(mode==='mine'?'전체 모집':'우리 팀',mode==='mine'?'list:0':'list:0:mine')];if(mine)buttons.push(btn('+ 상대 구하기','create',1));
  components.push(row(buttons));
@@ -130,7 +138,7 @@ async function syncTeamScrimPanelsNow(client,data){
     if(key==='board'){let batch=messages;while(true){for(const post of batch){if(post.author.id!==client.user.id)continue;const footer=post.embeds?.find(e=>e.footer?.text?.startsWith('ETG 스크림 모집글 · '))?.footer?.text;if(footer)recruitmentPosts.set(footer.slice('ETG 스크림 모집글 · '.length),{messageId:post.id,hash:null,revision:0});}if(batch.length<100)break;batch=await client.rest.get('/channels/'+channel.id+'/messages?limit=100&before='+batch.at(-1).id);}}
    }
   }
-  const items=data.items||[],active=items.filter(item=>['open','confirmed'].includes(item.status));
+  const items=data.items||[],active=items.filter(item=>['open','confirmed','playing'].includes(item.status));
   const payloads={
    guide:{embeds:[{...embed('프리미어 팀 스크림 이용 안내','1. **상대 구하기**에서 한국 시간 일정·맵·모집 내용을 입력하세요.\n2. **스크림-모집**의 개별 모집글에서 **맞짱 까기**를 누르면 내 팀이 바로 상대 팀으로 확정됩니다.\n3. 참여 취소·모집 취소·경기 종료도 같은 메뉴에서 할 수 있습니다.\n\n맵 지정 모집 / 모집 후 맵 선택 / 밴픽으로 결정 중 선택할 수 있습니다.\n\n`/스크림` 명령으로도 열 수 있습니다. 일정은 **01월 01일 00:20** 형식의 한국 시간(UTC+9)으로 입력합니다. 연도는 다가오는 날짜로 자동 적용되며 180일 이내 일정만 등록할 수 있습니다.'),footer:{text:'ETG 팀 스크림 · guide'}}],components:[row([btn('상대 구하기','create',1),btn('모집 목록','list:0'),link])]},
    board:{content:'**스크림 모집**\n각 모집글의 **맞짱 까기** 버튼을 누르면 소속 팀으로 바로 대진이 확정됩니다.',embeds:[{footer:{text:'ETG 팀 스크림 · board'},description:'아래에서 모집글을 확인하세요.'}],components:[row([btn('+ 상대 구하기','create'),link])]}
