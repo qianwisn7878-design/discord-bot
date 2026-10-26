@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {isTeamScrimInteraction,handleTeamScrimInteraction,parseScrimKoreanDate,syncTeamScrimPanels,TEAM_SCRIM_CATEGORY} from '../premier-scrims.mjs';
+import {isTeamScrimInteraction,handleTeamScrimInteraction,parseScrimKoreanDate,syncTeamScrimPanels,TEAM_SCRIM_CATEGORY,teamScrimPostPayload} from '../premier-scrims.mjs';
 const guild='1492461447568162876',user='111111111111111111';
 const fixture=()=>({mapPool:['바인드','어센트','스플릿'],myTeam:{id:'a',name:'상급1'},items:[{id:'item',revision:4,hostTeam:{id:'b',name:'상급2'},guestTeam:null,status:'open',startsAt:new Date(Date.now()+86400000).toISOString(),map:'협의',note:'연습',createdAt:new Date().toISOString()}]});
 function interaction(id){const result={id:'222222222222222222',guildId:guild,user:{id:user,username:'user'},customId:id,outputs:[],reply:async data=>{result.outputs.push(data);},isChatInputCommand:()=>false,isButton:()=>true,isStringSelectMenu:()=>false,isModalSubmit:()=>false,deferReply:async data=>{result.flags=data.flags;},editReply:async data=>{result.outputs.push(data);},showModal:async data=>{result.modal=data;}};return result;}
@@ -20,7 +20,7 @@ test('channels are inside the requested category and shared messages update with
   post:async(path,{body})=>{calls.push(['POST',path,body]);const id=String(++seq);if(path.endsWith('/channels')){assert.equal(body.parent_id,TEAM_SCRIM_CATEGORY);assert.equal(body.type,0);}else{assert.deepEqual(body.allowed_mentions,{parse:[]});messages.set(id,body);}return {id};},
   patch:async(path,{body})=>{calls.push(['PATCH',path,body]);return {};}
  }};
- const result=await syncTeamScrimPanels(client,fixture());assert.equal(result.version,'team-scrims-v1');assert.equal(calls.filter(c=>c[0]==='POST'&&c[1].endsWith('/channels')).length,2);assert.equal(messages.size,2);
+ const result=await syncTeamScrimPanels(client,fixture());assert.equal(result.version,'team-scrims-v1');assert.equal(calls.filter(c=>c[0]==='POST'&&c[1].endsWith('/channels')).length,2);assert.equal(messages.size,3);
  const before=calls.length;await syncTeamScrimPanels(client,fixture());assert.equal(calls.length,before,'unchanged shared panels do not make REST writes');
  const changed=fixture();changed.items[0].guestTeam={id:'a',name:'상급1'};changed.items[0].status='confirmed';await syncTeamScrimPanels(client,changed);assert(calls.at(-1)[0]==='PATCH');
 });
@@ -45,5 +45,25 @@ test('confirmed unspecified recruitment selects every game map with Discord drop
  const first=interaction('etgp:map-start:item');await handleTeamScrimInteraction(first,bridge,64);let id=first.outputs[0].components[0].components[0].custom_id;
  for(const value of ['어센트','바인드']){const i=interaction(id);i.values=[value];await handleTeamScrimInteraction(i,bridge,64);}
  assert.deepEqual(saved.maps,['어센트','바인드']);assert.equal(saved.action,'choose-map');
+});
+
+test('challenge button joins immediately using fresh revision and trusted Discord identity',async()=>{
+ const calls=[],state=fixture(),i=interaction('etgp:challenge:item');
+ await handleTeamScrimInteraction(i,async(_,body)=>{calls.push(body);return body.data?{...state,items:[{...state.items[0],status:'confirmed',guestTeam:state.myTeam,revision:5}]}:state;},64);
+ assert.equal(calls.length,2);assert.deepEqual(calls[1].data,{action:'join',id:'item',revision:4});assert.equal(calls[1].userId,user);assert.match(i.outputs[0].content,/확정/);assert(!JSON.stringify(i.outputs).includes('etgp:confirm:join'));
+});
+test('recruitment message exposes one direct challenge button and disables it after matching',()=>{
+ const item=fixture().items[0],open=teamScrimPostPayload(item);assert.equal(open.components[0].components[0].label,'맞짱 까기');assert.equal(open.components[0].components[0].custom_id,'etgp:challenge:item');assert.equal(open.components[0].components[0].disabled,false);
+ const closed=teamScrimPostPayload({...item,status:'confirmed',guestTeam:{id:'a',name:'상급1'}});assert.equal(closed.components[0].components[0].disabled,true);assert.match(closed.embeds[0].title,/상급2 vs 상급1/);assert.deepEqual(open.allowed_mentions,{parse:[]});
+});
+test('individual posts survive restart without duplication and terminal states edit the same post',async()=>{
+ const channels=[{id:'guide',type:0,parent_id:TEAM_SCRIM_CATEGORY,name:'스크림-안내'},{id:'board',type:0,parent_id:TEAM_SCRIM_CATEGORY,name:'스크림-모집'}],messages=new Map,patches=[];let seq=0;
+ const client={user:{id:'bot'},rest:{get:async path=>{if(path==='/channels/'+TEAM_SCRIM_CATEGORY)return {type:4,guild_id:guild};if(path==='/guilds/'+guild+'/channels')return channels;const channel=path.split('/')[2];return [...messages.values()].filter(m=>m.channel===channel).reverse();},post:async(path,{body})=>{const id=String(++seq);messages.set(id,{...body,id,channel:path.split('/')[2],author:{id:'bot'}});return {id};},patch:async(path,{body})=>{const id=path.split('/').at(-1);patches.push(id);Object.assign(messages.get(id),body);return {};}}};
+ const state=fixture();state.items.push({...state.items[0],id:'second',hostTeam:{id:'c',name:'상급3'}});
+ const initial=await import('../premier-scrims.mjs?posts-initial');await initial.syncTeamScrimPanels(client,state);assert.equal(messages.size,4);
+ const posts=[...messages.values()].filter(m=>m.embeds?.[0].footer?.text.startsWith('ETG 스크림 모집글 · '));assert.equal(posts.length,2);const target=posts.find(m=>m.embeds[0].footer.text.endsWith('item')).id;
+ const restarted=await import('../premier-scrims.mjs?posts-restarted');await restarted.syncTeamScrimPanels(client,state);assert.equal(messages.size,4);
+ state.items[0]={...state.items[0],status:'cancelled',revision:5};await restarted.syncTeamScrimPanels(client,state);assert.equal(messages.size,4);assert.equal(messages.get(target).components[0].components[0].disabled,true);assert.match(messages.get(target).embeds[0].description,/취소/);
+ await restarted.syncTeamScrimPanels(client,{items:[{...state.items[0],revision:4,status:'open'}]});assert.match(messages.get(target).embeds[0].description,/취소/);
 });
 

@@ -55,7 +55,7 @@ export async function handleTeamScrimInteraction(i,bridge,ephemeralFlag){
  if(action==='submit-draft'){
   const d=getDraft(parts[2]);if(d.mapMode==='fixed'&&d.maps.length!==d.count)throw Error('경기별 맵을 먼저 선택하세요.');
   const data=await request({action:'create',region:d.region,rounds:d.rounds,matchCount:d.count,bestOf:d.mapMode==='veto'?d.count:1,mapMode:d.mapMode,maps:d.maps,startsAt:parseScrimKoreanDate(i.fields.getTextInputValue('startsAt').trim()),note:i.fields.getTextInputValue('note')});scrimDrafts.delete(d.id);
-  await reply({content:'모집 등록 완료 · '+data.myTeam.name,components:[row([btn('모집 목록','list:0'),link])]});return;
+  await reply({content:'모집 등록 완료 · '+data.myTeam.name,components:[row([btn('모집 목록','list:0'),link])]});if(i.client)await syncTeamScrimPanels(i.client,{items:data.items});return;
  }
  if(action==='map-start'||action==='map-choose'){
   const data=await request(),item=data.items.find(item=>item.id===parts[2]);if(!item||item.mapMode!=='later'||item.mapChosen||item.status!=='confirmed'||![item.hostTeam.id,item.guestTeam?.id].includes(data.myTeam?.id))throw Error('참여 팀의 미지정 스크림을 선택하세요.');
@@ -66,6 +66,13 @@ export async function handleTeamScrimInteraction(i,bridge,ephemeralFlag){
  if(action==='submit'){
   const data=await request({action:'create',startsAt:parseScrimKoreanDate(i.fields.getTextInputValue('startsAt').trim()),mapMode:parts[2]||'fixed',bestOf:Number(parts[3]||1),map:parts[2]&&parts[2]!=='fixed'?'':i.fields.getTextInputValue('map'),note:i.fields.getTextInputValue('note')});
   await reply({embeds:[embed('모집 등록 완료',safe(data.myTeam.name)+' 팀의 모집을 홈페이지와 디스코드에 등록했습니다.')],components:[row([btn('모집 목록','list:0'),link])]});return;
+ }
+ if(action==='challenge'){
+  const state=await request(),item=state.items.find(item=>item.id===parts[2]);
+  if(!item)throw Error('모집 글을 찾을 수 없습니다.');
+  const result=await request({action:'join',id:item.id,revision:item.revision});
+  await reply({content:result.myTeam.name+' 팀이 '+item.hostTeam.name+' 팀의 상대로 확정되었습니다.',components:[row([btn('상세 보기','view:'+item.id),link])]});
+  if(i.client)await syncTeamScrimPanels(i.client,{items:result.items});return;
  }
  if(action==='execute'){
   if(!['join','withdraw','cancel','finish'].includes(parts[2]))throw Error('작업을 확인하세요.');
@@ -101,10 +108,15 @@ export async function handleTeamScrimInteraction(i,bridge,ephemeralFlag){
  await reply({embeds:[embed('ETG 프리미어 팀 스크림',(data.myTeam?'내 팀: '+safe(data.myTeam.name):'소속 프리미어 팀이 있어야 모집·참여할 수 있습니다.')+'\n'+(shown.length?'모집 글을 선택하면 일정·내용과 참여 버튼을 볼 수 있습니다.':'표시할 스크림이 없습니다.')+'\n'+items.length+'건 · 홈페이지와 같은 상태를 사용합니다.')],components});
 }
 
-// Two shared panels are updated in place. Detail and confirmation menus are private.
-let panels=null,syncing=false;
-export async function syncTeamScrimPanels(client,data){
- if(!data||syncing)return;syncing=true;
+// Each recruitment has one public message, recovered from Discord history after restart.
+let panels=null;const recruitmentPosts=new Map();let panelQueue=Promise.resolve();
+export function teamScrimPostPayload(item){
+ const open=item.status==='open'&&Date.parse(item.startsAt)>Date.now();
+ return {allowed_mentions:{parse:[]},embeds:[{...embed((item.hostTeam.name+' vs '+(item.guestTeam?.name||'상대 모집 중')).slice(0,256),'**'+(labels[item.status]||item.status)+'** · '+when(item)+'\n'+(item.region||'KR')+' · '+(item.rounds||13)+'R · '+(item.mapMode==='veto'?'BO'+(item.bestOf||1):(item.matchCount||1)+'판')+'\n맵: '+safe(item.map)+'\n\n'+safe(item.note||'추가 모집 내용 없음')),footer:{text:'ETG 스크림 모집글 · '+item.id}}],components:[row([{...btn(open?'맞짱 까기':'모집 마감','challenge:'+item.id,open?1:2),disabled:!open},btn('상세·관리','view:'+item.id),link])]};
+}
+export function syncTeamScrimPanels(client,data){const task=panelQueue.then(()=>syncTeamScrimPanelsNow(client,data));panelQueue=task.catch(()=>{});return task;}
+async function syncTeamScrimPanelsNow(client,data){
+ if(!data)return;
  try{
   if(!panels){
    const category=await client.rest.get('/channels/'+TEAM_SCRIM_CATEGORY);
@@ -115,12 +127,13 @@ export async function syncTeamScrimPanels(client,data){
     const channel=existing||await client.rest.post('/guilds/'+category.guild_id+'/channels',{body:{name,type:0,parent_id:TEAM_SCRIM_CATEGORY,topic}});
     const messages=await client.rest.get('/channels/'+channel.id+'/messages?limit=100'),message=messages.find(m=>m.author.id===client.user.id&&m.embeds?.some(e=>e.footer?.text==='ETG 팀 스크림 · '+key));
     panels[key]={channelId:channel.id,messageId:message?.id,hash:null};
+    if(key==='board'){let batch=messages;while(true){for(const post of batch){if(post.author.id!==client.user.id)continue;const footer=post.embeds?.find(e=>e.footer?.text?.startsWith('ETG 스크림 모집글 · '))?.footer?.text;if(footer)recruitmentPosts.set(footer.slice('ETG 스크림 모집글 · '.length),{messageId:post.id,hash:null,revision:0});}if(batch.length<100)break;batch=await client.rest.get('/channels/'+channel.id+'/messages?limit=100&before='+batch.at(-1).id);}}
    }
   }
   const items=data.items||[],active=items.filter(item=>['open','confirmed'].includes(item.status));
   const payloads={
-   guide:{embeds:[{...embed('프리미어 팀 스크림 이용 안내','1. **상대 구하기**에서 한국 시간 일정·맵·모집 내용을 입력하세요.\n2. **모집 목록**에서 상대 팀의 글을 선택하고 **우리 팀으로 참여 → 확정**을 누르세요.\n3. 참여 취소·모집 취소·경기 종료도 같은 메뉴에서 할 수 있습니다.\n\n맵 지정 모집 / 모집 후 맵 선택 / 밴픽으로 결정 중 선택할 수 있습니다.\n\n`/스크림` 명령으로도 열 수 있습니다. 일정은 **01월 01일 00:20** 형식의 한국 시간(UTC+9)으로 입력합니다. 연도는 다가오는 날짜로 자동 적용되며 180일 이내 일정만 등록할 수 있습니다.'),footer:{text:'ETG 팀 스크림 · guide'}}],components:[row([btn('상대 구하기','create',1),btn('모집 목록','list:0'),link])]},
-   board:{embeds:[{...embed('팀 스크림 모집판',active.length?active.slice(0,10).map(item=>'**'+safe(item.hostTeam.name)+' vs '+safe(item.guestTeam?.name||'상대 모집 중')+'**\n'+labels[item.status]+' · '+when(item)+' · '+safe(item.map)).join('\n\n')+'\n\n총 '+active.length+'건 · 목록에서 전체 모집을 확인하세요.':'현재 모집 중이거나 확정된 스크림이 없습니다. **상대 구하기**로 우리 팀의 모집을 시작하세요.'),footer:{text:'ETG 팀 스크림 · board'}}],components:[row([btn('모집 목록','list:0',1),btn('우리 팀 스크림','list:0:mine'),btn('+ 상대 구하기','create'),link])]}
+   guide:{embeds:[{...embed('프리미어 팀 스크림 이용 안내','1. **상대 구하기**에서 한국 시간 일정·맵·모집 내용을 입력하세요.\n2. **스크림-모집**의 개별 모집글에서 **맞짱 까기**를 누르면 내 팀이 바로 상대 팀으로 확정됩니다.\n3. 참여 취소·모집 취소·경기 종료도 같은 메뉴에서 할 수 있습니다.\n\n맵 지정 모집 / 모집 후 맵 선택 / 밴픽으로 결정 중 선택할 수 있습니다.\n\n`/스크림` 명령으로도 열 수 있습니다. 일정은 **01월 01일 00:20** 형식의 한국 시간(UTC+9)으로 입력합니다. 연도는 다가오는 날짜로 자동 적용되며 180일 이내 일정만 등록할 수 있습니다.'),footer:{text:'ETG 팀 스크림 · guide'}}],components:[row([btn('상대 구하기','create',1),btn('모집 목록','list:0'),link])]},
+   board:{content:'**스크림 모집**\n각 모집글의 **맞짱 까기** 버튼을 누르면 소속 팀으로 바로 대진이 확정됩니다.',embeds:[{footer:{text:'ETG 팀 스크림 · board'},description:'아래에서 모집글을 확인하세요.'}],components:[row([btn('+ 상대 구하기','create'),link])]}
   };
   for(const key of ['guide','board']){
    const panel=panels[key],body={...payloads[key],allowed_mentions:{parse:[]}},hash=JSON.stringify(body);if(hash===panel.hash)continue;
@@ -128,7 +141,15 @@ export async function syncTeamScrimPanels(client,data){
    if(!panel.messageId)panel.messageId=(await client.rest.post('/channels/'+panel.channelId+'/messages',{body})).id;
    panel.hash=hash;
   }
-  return {guildId:panels.guildId,guideChannelId:panels.guide.channelId,boardChannelId:panels.board.channelId,version:'team-scrims-v1'};
- }catch(error){panels=null;throw error;}finally{syncing=false;}
+  for(const item of items){
+   let record=recruitmentPosts.get(item.id);if(!record&&!['open','confirmed'].includes(item.status))continue;
+   if(record&&(record.revision||0)>(item.revision||0))continue;
+   const body=teamScrimPostPayload(item),hash=JSON.stringify(body);if(record?.hash===hash)continue;
+   if(record?.messageId){try{await client.rest.patch('/channels/'+panels.board.channelId+'/messages/'+record.messageId,{body});}catch(error){if(error.status!==404)throw error;record=null;}}
+   if(!record){const post=await client.rest.post('/channels/'+panels.board.channelId+'/messages',{body:{...body,nonce:'etgp'+item.id.replaceAll('-','').slice(0,20),enforce_nonce:true}});record={messageId:post.id};}
+   recruitmentPosts.set(item.id,{...record,hash,revision:item.revision||0});
+  }
+  return {guildId:panels.guildId,guideChannelId:panels.guide.channelId,boardChannelId:panels.board.channelId,version:'team-scrims-v1',publicationMode:'individual-posts-v1',postCount:recruitmentPosts.size};
+ }catch(error){panels=null;throw error;}
 }
 
