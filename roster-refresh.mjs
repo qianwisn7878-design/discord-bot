@@ -1,5 +1,5 @@
 const ROSTER_GUILDS=new Set(['1492461447568162876','1554439098490429442','1554439352652922891','1563217788288499813']);
-export function createRosterRefresh({refresh,onError=()=>{},delayMs=1000,setTimer=setTimeout,clearTimer=clearTimeout}){
+export function createRosterRefresh({refresh,onError=()=>{},delayMs=250,setTimer=setTimeout,clearTimer=clearTimeout}){
  let timer=null,running=false,pending=false,stopped=false,retries=0;
  const arm=(delay=delayMs)=>{if(timer!==null)clearTimer(timer);timer=setTimer(run,delay);timer?.unref?.();};
  const run=async()=>{
