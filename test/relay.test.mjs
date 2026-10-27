@@ -10,3 +10,11 @@ test('relay cannot fetch URLs, local files, private backup paths or unapproved D
  for(const path of ['https://evil.example','/../../secret','/users/@me/../x','/channels/'+channel+'/messages#x','/api/discord-bot/legacy-state'])assert.equal((await executeRelayJob(client,{kind:'rest',path,method:'GET'})).status,403);
 });
 
+
+
+test('legacy scrim veto channels can be created and used without opening arbitrary channels',async()=>{
+ const id='777777777777777777',vetoClient={user:{id:'bot'},rest:{get:async()=>({id,guild_id:guild,type:0,name:'밴픽-12ab34cd'}),post:async()=>({id})}};
+ await validateRelayJob(vetoClient,{kind:'rest',method:'POST',path:'/guilds/'+guild+'/channels',body:{name:'밴픽-12ab34cd',type:0,parent_id:'1561391996868886579'}});
+ await validateRelayJob(vetoClient,{kind:'rest',method:'POST',path:'/channels/'+id+'/messages',body:{content:'밴픽'}});
+ for(const name of ['밴픽-관리','밴픽-12ab34cd-extra','밴픽-zzzzzzzz'])await assert.rejects(()=>validateRelayJob(vetoClient,{kind:'rest',method:'POST',path:'/guilds/'+guild+'/channels',body:{name,type:0}}));
+});

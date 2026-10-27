@@ -3,7 +3,7 @@ import {executeScrimVoice} from './scrim-voice-relay.mjs';
 const GUILDS=new Set(['1492461447568162876','1554439098490429442','1554439352652922891','1563217788288499813','1477820654739787858']);
 const outboundDMs=new Set();
 const publicChannel=name=>new Set(['📣・공지-소식','📝・모집-게시판','📅・일정-이벤트']).has(name)||String(name||'').includes('포인트-상점');
-const managedName=name=>/^(내전|스크림|[AB]팀)\s/.test(name||'');
+const managedName=name=>/^(내전|스크림|[AB]팀)\s/.test(name||'')||/^밴픽-[a-f0-9]{8}$/.test(name||'');
 const forbiddenPermissions=8n|32n|268435456n|536870912n;
 export async function validateRelayJob(client,job){
  if(job.kind==='cleanup-voices'||job.kind==='scrim-voice')return;
@@ -72,3 +72,4 @@ export function installDiscordRelay(client,bridge,{idleMs=1000,retryMs=5000}={})
  schedule(0);console.log('[봇 중계] exchange-v1 준비');
  return {stop(){stopped=true;clearTimeout(timer);}};
 }
+
