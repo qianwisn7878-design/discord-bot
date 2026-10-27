@@ -9,7 +9,7 @@ export async function enforceDutyScope(client,bridge){
   try{await guild.roles.fetch();
    if(id===COMMUNITY_GUILD){for(const department of DEPARTMENTS){const name=department+' 담당';if(![...guild.roles.cache.values()].some(r=>r.name===name&&!r.managed))await guild.roles.create({name,permissions:0n,mentionable:false,hoist:false});}}
    else for(const role of [...guild.roles.cache.values()]){if(role.managed||!communityOnlyDuty(role.name))continue;if(role.permissions.bitfield!==0n){status.protected.push({guild:id,name:role.name});continue;}await role.delete('공통 담당 역할은 커뮤니티 서버에서만 관리');status.removed++;}
-   if(client.options.intents.has(2)){const members=[...((await guild.members.fetch()).values())].filter(m=>!m.user.bot);for(let offset=0;offset<members.length;offset+=100)await bridge('/api/discord-bot/rosters-refresh',rosterSnapshot(guild,members.slice(offset,offset+100)));if(!members.length)await bridge('/api/discord-bot/rosters-refresh',rosterSnapshot(guild,[]));}
+   await bridge('/api/discord-bot/rosters-refresh',rosterSnapshot(guild,[]));
   }catch(error){status.errors.push({guild:id,message:String(error.message).slice(0,150)});}
  }
  status.complete=!status.errors.length&&!status.protected.length;status.at=new Date().toISOString();return status;
