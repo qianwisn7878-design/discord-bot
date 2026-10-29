@@ -21,7 +21,7 @@ export async function validateRelayJob(client,job){
   if(parts.length===2&&job.method==='GET')return {prefetched:channel};
   if(parts[2]==='roles'){
    if(body.permissions!==undefined&&(BigInt(body.permissions)&forbiddenPermissions)!==0n)throw Error('관리자 권한 역할은 홈페이지에서 만들 수 없습니다.');
-   if(parts[3]&&job.method==='DELETE'){const roles=await client.rest.get('/guilds/'+parts[1]+'/roles'),role=roles.find(r=>r.id===parts[3]);if(role&&(role.managed||(BigInt(role.permissions)&forbiddenPermissions)!==0n||!/^(초청|최상급|상급|중상급|중급|초급)\s*\d+$/.test(role.name)))throw Error('하위 팀 역할만 삭제할 수 있습니다.');}
+   if(parts[3]&&job.method==='DELETE'){const roles=await client.rest.get('/guilds/'+parts[1]+'/roles'),role=roles.find(r=>r.id===parts[3]);if(role&&(role.managed||(BigInt(role.permissions)&forbiddenPermissions)!==0n||(!/^(초청|최상급|상급|중상급|중급|초급)\s*\d+$/.test(role.name)&&!(/^(감사|사법) 담당(?: (총관리자|관리자))?$/.test(role.name)&&BigInt(role.permissions)===0n))))throw Error('하위 팀 역할만 삭제할 수 있습니다.');}
    if(parts.length<=4)return;
   }
   if(parts[2]==='members'){
