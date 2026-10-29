@@ -1,17 +1,17 @@
 export const TICKET_CATEGORY='1564911577017360465';
 const OWNER='794026986002448414',MARK='ETG Support Tickets v1',PREFIX='etgticket:',VIEW=1024n,SEND=2048n,READ=65536n,FILES=32768n,EMBED=16384n;
-const TYPES={report:'신고',question:'문의',suggestion:'건의'},SCOPES={pubg:'배그 클랜',valorant:'발로란트 팀',community:'커뮤니티'};
+const TYPES={report:'신고',question:'문의',suggestion:'건의'},SCOPES={pubg:'배그 클랜',valorantClan:'발로란트 클랜',valorant:'발로란트 팀',community:'커뮤니티'};
 const BASE_STAFF=new Set(['신고문의담당','커뮤니티총관리자','커뮤니티부관리자']);
 const row=components=>({type:1,components}),button=(label,action,style=2)=>({type:2,label,style,custom_id:PREFIX+action});
 const quiet={parse:[]};
 export function ticketMarker(value){
- const m=/^etg-support:v2:(\d{17,20}):(report|question|suggestion):(pubg|valorant|community):(\d{17,20}):(open|closed)$/.exec(value||'');
+ const m=/^etg-support:v2:(\d{17,20}):(report|question|suggestion):(pubg|valorantClan|valorant|community):(\d{17,20}):(open|closed)$/.exec(value||'');
  if(m)return {owner:m[1],kind:m[2],scope:m[3],number:m[4],closed:m[5]==='closed'};
  const old=/^etg-support:v1:(\d{17,20}):(report|question|suggestion):(\d{17,20}):(open|closed)$/.exec(value||'');return old?{owner:old[1],kind:old[2],scope:'community',number:old[3],closed:old[4]==='closed'}:null;
 }
 const topic=t=>`etg-support:v2:${t.owner}:${t.kind}:${t.scope}:${t.number}:${t.closed?'closed':'open'}`;
 export function ticketScopePicker(kind){if(!TYPES[kind])throw Error('접수 종류를 확인하세요.');return {content:TYPES[kind]+' · 어느 곳과 관련된 내용인가요?',components:[row([{type:3,custom_id:PREFIX+'scope:'+kind,placeholder:'관련 분야를 선택하세요',min_values:1,max_values:1,options:Object.entries(SCOPES).map(([value,label])=>({label,value}))}])],allowed_mentions:quiet};}
-export function ticketPanel(){return {embeds:[{title:'신고 · 문의 · 건의 접수',description:'접수 종류(신고·문의·건의) → 관련 분야(배그 클랜·발로란트 팀·커뮤니티) → 내용 작성 순서로 접수해 주세요.\n본인과 담당 운영진만 볼 수 있는 비공개 티켓이 생성됩니다.\n\n티켓을 닫아도 기록은 보관되며 다시 열 수 있습니다.',color:0xc5f277,footer:{text:MARK}}],components:[row([{type:3,custom_id:PREFIX+'create',placeholder:'접수 종류를 선택하세요',min_values:1,max_values:1,options:Object.entries(TYPES).map(([value,label])=>({label,value,description:{report:'규칙 위반이나 피해 사실을 신고합니다.',question:'서버 이용이나 운영에 관해 질문합니다.',suggestion:'개선 의견이나 새로운 아이디어를 제안합니다.'}[value]}))}])],allowed_mentions:quiet};}
+export function ticketPanel(){return {embeds:[{title:'신고 · 문의 · 건의 접수',description:'접수 종류(신고·문의·건의) → 관련 분야(배그 클랜·발로란트 클랜·발로란트 팀·커뮤니티) → 내용 작성 순서로 접수해 주세요.\n본인과 담당 운영진만 볼 수 있는 비공개 티켓이 생성됩니다.\n\n티켓을 닫아도 기록은 보관되며 다시 열 수 있습니다.',color:0xc5f277,footer:{text:MARK}}],components:[row([{type:3,custom_id:PREFIX+'create',placeholder:'접수 종류를 선택하세요',min_values:1,max_values:1,options:Object.entries(TYPES).map(([value,label])=>({label,value,description:{report:'규칙 위반이나 피해 사실을 신고합니다.',question:'서버 이용이나 운영에 관해 질문합니다.',suggestion:'개선 의견이나 새로운 아이디어를 제안합니다.'}[value]}))}])],allowed_mentions:quiet};}
 export function ticketControls(closed){return {embeds:[{title:closed?'티켓이 닫혔습니다':'티켓 접수 완료',description:closed?'이 채널에 기록이 보관됩니다. 다시 열어 상담을 이어갈 수 있습니다.\n영구 삭제는 전체 총관리자 본인·커뮤니티 부관리자만 할 수 있습니다.':'내용을 확인한 운영진이 답변합니다. 추가 자료는 이 채널에 남겨 주세요.\n상담이 끝나면 아래 버튼으로 닫을 수 있습니다.',color:closed?0x84916f:0xc5f277}],components:[row(closed?[button('다시 열기','reopen',3),button('티켓 삭제','delete',4)]:[button('티켓 닫기','close',2)])],allowed_mentions:quiet};}
 // Keep requester overwrites explicit: category permissions never make a ticket public.
 function permissions(guildId,botId,staffIds,owner,closed){
@@ -21,7 +21,7 @@ function permissions(guildId,botId,staffIds,owner,closed){
 export function createSupportTickets(rest,botId){
  const locks=new Map();let lastPanel=0;
  async function serial(key,fn){const task=(locks.get(key)||Promise.resolve()).catch(()=>{}).then(fn);locks.set(key,task);try{return await task;}finally{if(locks.get(key)===task)locks.delete(key);}}
- async function context(scope='community'){if(!SCOPES[scope])throw Error('관련 분야를 확인하세요.');const category=await rest.get('/channels/'+TICKET_CATEGORY);if(category.type!==4)throw Error('티켓 카테고리를 확인하세요.');const roles=await rest.get('/guilds/'+category.guild_id+'/roles');return {scope,guild:category.guild_id,deletionStaff:roles.filter(r=>r.name.replace(/\s+/g,'')==='커뮤니티부관리자').map(r=>r.id),staff:roles.filter(r=>{const name=r.name.replace(/\s+/g,'');return BASE_STAFF.has(name)||scope==='pubg'&&['배그클랜총관리자','배그클랜부관리자'].includes(name);}).map(r=>r.id)};}
+ async function context(scope='community'){if(!SCOPES[scope])throw Error('관련 분야를 확인하세요.');const category=await rest.get('/channels/'+TICKET_CATEGORY);if(category.type!==4)throw Error('티켓 카테고리를 확인하세요.');const roles=await rest.get('/guilds/'+category.guild_id+'/roles');return {scope,guild:category.guild_id,deletionStaff:roles.filter(r=>r.name.replace(/\s+/g,'')==='커뮤니티부관리자').map(r=>r.id),staff:roles.filter(r=>{const name=r.name.replace(/\s+/g,'');return BASE_STAFF.has(name)||scope==='pubg'&&['배그클랜총관리자','배그클랜부관리자'].includes(name)||scope==='valorantClan'&&['발로란트클랜총관리자','발로란트클랜부관리자'].includes(name);}).map(r=>r.id)};}
 
  async function staff(userId,c){if(userId===OWNER)return true;const m=await rest.get('/guilds/'+c.guild+'/members/'+userId);return m.roles?.some(id=>c.staff.includes(id))||false;}
  async function load(channelId,userId,staffOnly=false){const channel=await rest.get('/channels/'+channelId),ticket=ticketMarker(channel.topic),c=await context(ticket?.scope||'community');if(channel.type!==0||channel.guild_id!==c.guild||channel.parent_id!==TICKET_CATEGORY||!ticket)throw Error('지정한 카테고리의 티켓에서만 사용할 수 있습니다.');const operator=await staff(userId,c);if(!operator&&(staffOnly||ticket.owner!==userId))throw Error(staffOnly?'티켓 삭제는 담당 운영진만 할 수 있습니다.':'본인 티켓 또는 담당 운영진만 처리할 수 있습니다.');return {c,channel,ticket};}
