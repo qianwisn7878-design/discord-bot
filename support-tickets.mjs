@@ -1,7 +1,7 @@
 export const TICKET_CATEGORY='1564911577017360465';
 const OWNER='794026986002448414',MARK='ETG Support Tickets v1',PREFIX='etgticket:',VIEW=1024n,SEND=2048n,READ=65536n,FILES=32768n,EMBED=16384n;
 const TYPES={report:'신고',question:'문의',suggestion:'건의'},SCOPES={pubg:'배그 클랜',valorantClan:'발로란트 클랜',valorant:'발로란트 팀',community:'커뮤니티'};
-const ADMIN_ROLES=new Set(['admin','subadmin','커뮤니티총관리자','커뮤니티부관리자','배그클랜총관리자','배그클랜부관리자','발로란트클랜총관리자','발로란트클랜부관리자','발로란트팀총관리자','발로란트팀부관리자']);
+const ADMIN_ROLES=new Set(['admin','커뮤니티총관리자','커뮤니티부관리자','배그클랜총관리자','배그클랜부관리자','발로란트클랜총관리자','발로란트클랜부관리자','발로란트팀총관리자','발로란트팀부관리자']);
 export const TICKET_LIMIT=3;
 const roleName=r=>r.name.toLowerCase().replace(/\s+/g,'');
 const BASE_STAFF=new Set(['신고문의담당','커뮤니티총관리자','커뮤니티부관리자']);
