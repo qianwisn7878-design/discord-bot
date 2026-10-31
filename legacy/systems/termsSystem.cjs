@@ -409,7 +409,7 @@ async function handleReactionRemove(
 }
 async function startTermsSystem(client) {
     startCommunityTermsSystem(client);
-    if(!client.__termsLeaveCleanupInstalled){client.__termsLeaveCleanupInstalled=true;client.on(Events.GuildMemberRemove,member=>{removeDepartedTermsReactions(client,member).catch(e=>console.error('[약관] 퇴장 반응 정리 실패:',e.message));});}
+    if(!client.__termsLeaveCleanupInstalled){client.__termsLeaveCleanupInstalled=true;(client.__termsOn||client.on).call(client,Events.GuildMemberRemove,member=>{removeDepartedTermsReactions(client,member).catch(e=>console.error('[약관] 퇴장 반응 정리 실패:',e.message));});}
     await createTermsMessages(
         client
     );
@@ -480,9 +480,9 @@ async function communityTermsReaction(client,reaction,user,agreed){
 }
 function startCommunityTermsSystem(client){
  if(client.__communityTermsInstalled)return;client.__communityTermsInstalled=true;
- client.on(Events.MessageReactionAdd,(reaction,user)=>{communityTermsReaction(client,reaction,user,true).catch(e=>console.error('[커뮤니티 약관]',e.message));});
- client.on(Events.MessageReactionRemove,(reaction,user)=>{communityTermsReaction(client,reaction,user,false).catch(e=>console.error('[커뮤니티 약관]',e.message));});
- client.on(Events.GuildMemberAdd,member=>{if(member.user.bot||member.guild.id!==COMMUNITY_TERMS.guild)return;queueCommunityConsent(member.id,()=>setCommunityConsent(member,false));});
+ (client.__termsOn||client.on).call(client,Events.MessageReactionAdd,(reaction,user)=>{communityTermsReaction(client,reaction,user,true).catch(e=>console.error('[커뮤니티 약관]',e.message));});
+ (client.__termsOn||client.on).call(client,Events.MessageReactionRemove,(reaction,user)=>{communityTermsReaction(client,reaction,user,false).catch(e=>console.error('[커뮤니티 약관]',e.message));});
+ (client.__termsOn||client.on).call(client,Events.GuildMemberAdd,member=>{if(member.user.bot||member.guild.id!==COMMUNITY_TERMS.guild)return;queueCommunityConsent(member.id,()=>setCommunityConsent(member,false));});
  const refresh=()=>ensureCommunityTermsMessage(client).catch(e=>console.error('[커뮤니티 약관] 안내 생성 실패:',e.message));
  refresh();const timer=setInterval(refresh,300000);timer.unref?.();
 }
