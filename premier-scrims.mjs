@@ -102,7 +102,7 @@ export async function handleTeamScrimInteraction(i,bridge,ephemeralFlag){
   if(item.status==='confirmed'&&guest&&future)add('참여 취소','withdraw');
   if(['open','confirmed','expired'].includes(item.status)&&(host||data.canModerate))add('모집 취소','cancel');
   if(item.status==='confirmed'&&(host||guest))buttons.push(btn('스크림 시작하기','run:start:'+item.id));
-  if(item.status==='playing'&&(host||guest)){buttons.push(btn('대기실 입장','run:join-voice:'+item.id));if(!item.run?.gameStartedAt)buttons.push(btn('경기 시작','run:begin-match:'+item.id));else{const current=item.run.series?.sets?.at(-1);if(!current?.result)buttons.push(btn('전적 불러오기','run:import-set:'+item.id));else buttons.push(btn(item.run.done?'스크림 마무리':'다음 경기','run:'+(item.run.done?'finish':'next-set')+':'+item.id));}}
+  if(item.status==='playing'&&(host||guest)){buttons.push(btn('대기실 입장','run:join-voice:'+item.id));if(!item.run?.gameStartedAt)buttons.push(btn('경기 시작','run:begin-match:'+item.id));else{const current=item.run.series?.sets?.at(-1);if(!current?.result)buttons.push(btn((current?.number||1)+'세트 전적 불러오기','run:import-set:'+item.id,3));else buttons.push(btn(item.run.done?'스크림 마무리':'다음 경기','run:'+(item.run.done?'finish':'next-set')+':'+item.id));}}
   if(['confirmed','playing'].includes(item.status)&&(host||guest)&&item.mapMode==='later'&&!item.mapChosen)buttons.push(btn('경기별 맵 선택','map-start:'+item.id));
   if(['confirmed','playing'].includes(item.status)&&(host||guest)&&item.mapMode==='veto')buttons.push({type:2,style:5,label:'맵 선택·밴픽 진행',url:SITE});
   buttons.push(btn('최신 목록','list:0'),link);
