@@ -137,6 +137,7 @@ function getRoleBasedInfos(
     member,
     category
 ) {
+    if(category==='나이')return [...new Set([...member.roles.cache.values()].filter(role=>/^(?:19|20)?(\\d{2})년생$/.test(role.name.replace(/\\s+/g,''))).map(role=>role.name))];
     const categoryRoles =
         ROLE_INFO[category];
     if (!categoryRoles) {
