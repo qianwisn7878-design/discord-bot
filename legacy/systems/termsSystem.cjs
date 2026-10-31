@@ -409,6 +409,7 @@ async function handleReactionRemove(
 }
 async function startTermsSystem(client) {
     startCommunityTermsSystem(client);
+    if(!client.__termsLeaveCleanupInstalled){client.__termsLeaveCleanupInstalled=true;client.on(Events.GuildMemberRemove,member=>{removeDepartedTermsReactions(client,member).catch(e=>console.error('[약관] 퇴장 반응 정리 실패:',e.message));});}
     await createTermsMessages(
         client
     );
@@ -426,6 +427,7 @@ async function startTermsSystem(client) {
 }
 module.exports = {startTermsSystem,createTermsMessages};
 
+const COMMUNITY_TERMS_CONTENT='[ 필수 ] 이용약관 동의\n\n이용약관에 동의하신다면 해당 메세지에 체크 반응을 눌러주세요.';
 const COMMUNITY_TERMS={guild:'1554439098490429442',channel:'1556927431502340150',agreed:'1566006162112122942',pending:'1565936804811776180'};
 let communityTermsMessageId=null,communityTermsSetup=null;
 const communityTermsQueues=new Map();
@@ -434,14 +436,14 @@ async function ensureCommunityTermsMessage(client){
  communityTermsSetup=(async()=>{
   const channel=await client.channels.fetch(COMMUNITY_TERMS.channel);
   if(!channel?.isTextBased()||channel.guildId!==COMMUNITY_TERMS.guild)throw Error('커뮤니티 약관 채널을 확인하세요.');
-  if(communityTermsMessageId){try{const message=await channel.messages.fetch(communityTermsMessageId);await message.react(CHECK_EMOJI);return message;}catch(e){if(e.code!==10008&&e.status!==404)throw e;communityTermsMessageId=null;}}
+  if(communityTermsMessageId){try{const message=await channel.messages.fetch(communityTermsMessageId);if(message.content!==COMMUNITY_TERMS_CONTENT)await message.edit({content:COMMUNITY_TERMS_CONTENT,allowedMentions:{parse:[]}});await message.react(CHECK_EMOJI);return message;}catch(e){if(e.code!==10008&&e.status!==404)throw e;communityTermsMessageId=null;}}
   let before;
   for(let page=0;page<50;page++){
    const messages=await channel.messages.fetch({limit:100,...(before?{before}:{})});
    const existing=messages.find(m=>m.author.id===client.user.id&&m.content.startsWith('[ 필수 ] 이용약관 동의'));
-   if(existing){communityTermsMessageId=existing.id;await existing.react(CHECK_EMOJI);return existing;}
+   if(existing){communityTermsMessageId=existing.id;if(existing.content!==COMMUNITY_TERMS_CONTENT)await existing.edit({content:COMMUNITY_TERMS_CONTENT,allowedMentions:{parse:[]}});await existing.react(CHECK_EMOJI);return existing;}
    if(messages.size<100){
-    const message=await channel.send({content:'[ 필수 ] 이용약관 동의\n\n이 채널의 이용약관을 확인한 뒤, 동의하신다면 이 메시지에 ✅ 체크 반응을 눌러주세요.\n체크 반응을 취소하면 약관 미동의 상태로 돌아갑니다.',allowedMentions:{parse:[]}});
+    const message=await channel.send({content:COMMUNITY_TERMS_CONTENT,allowedMentions:{parse:[]}});
     communityTermsMessageId=message.id;await message.react(CHECK_EMOJI);return message;
    }
    before=messages.last().id;
@@ -483,4 +485,21 @@ function startCommunityTermsSystem(client){
  client.on(Events.GuildMemberAdd,member=>{if(member.user.bot||member.guild.id!==COMMUNITY_TERMS.guild)return;queueCommunityConsent(member.id,()=>setCommunityConsent(member,false));});
  const refresh=()=>ensureCommunityTermsMessage(client).catch(e=>console.error('[커뮤니티 약관] 안내 생성 실패:',e.message));
  refresh();const timer=setInterval(refresh,300000);timer.unref?.();
+}
+
+async function removeDepartedTermsReactions(client,member){
+ if(!['1492461447568162876',COMMUNITY_TERMS.guild].includes(member.guild.id))return;
+ const community=member.guild.id===COMMUNITY_TERMS.guild;
+ const channel=await client.channels.fetch(community?COMMUNITY_TERMS.channel:TERMS_CHANNEL_ID);
+ if(!channel?.isTextBased()||channel.guildId!==member.guild.id)return;
+ const ids=new Set((community?[communityTermsMessageId]:[termsMessageId,privacyMessageId]).filter(Boolean));
+ const messages=await channel.messages.fetch({limit:100});
+ for(const message of messages.values())if(message.author.id===client.user.id&&
+ (message.content.startsWith('[ 필수 ] 이용약관 동의')||!community&&message.content.startsWith('[ 필수 ] 개인정보 수집 및 이용 동의')))ids.add(message.id);
+ const failures=[];
+ for(const id of ids){
+  try{await client.rest.delete('/channels/'+channel.id+'/messages/'+id+'/reactions/'+encodeURIComponent(CHECK_EMOJI)+'/'+member.id);}
+  catch(e){if(e.code!==10008&&e.code!==10014&&e.code!==10003&&e.status!==404)failures.push(e.message);}
+ }
+ if(failures.length)throw Error(failures.join('; '));
 }
