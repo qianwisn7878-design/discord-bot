@@ -31,11 +31,11 @@ export function installCommunityRegistration(client,bridge,{queuePath=path.resol
  client.on('interactionCreate',async i=>{
   if(i.guildId!==GUILD||i.channelId!==CHANNEL||![BUTTON,MODAL].includes(i.customId))return;
   try{
-   if(i.isButton()&&i.customId===BUTTON){await i.showModal({custom_id:MODAL,title:'커뮤니티 가입 정보',components:[{type:1,components:[{type:4,custom_id:'birthDate',label:'생년월일 (YYYY-MM-DD)',style:1,required:true,min_length:10,max_length:10,placeholder:'예: 2008-05-21'}]},{type:1,components:[{type:4,custom_id:'gender',label:'성별 (남자 / 여자)',style:1,required:true,min_length:2,max_length:2,placeholder:'남자 또는 여자'}]}]});return;}
+   if(i.isButton()&&i.customId===BUTTON){await i.showModal({custom_id:MODAL,title:'커뮤니티 가입 정보',components:[{type:1,components:[{type:4,custom_id:'birthDate',label:'생년월일',style:1,required:true,max_length:20,placeholder:'예: 2009-07-05 또는 20090705'}]},{type:1,components:[{type:4,custom_id:'gender',label:'성별 (남자 / 여자)',style:1,required:true,min_length:2,max_length:2,placeholder:'남자 또는 여자'}]}]});return;}
    if(!i.isModalSubmit()||i.customId!==MODAL)return;
    await i.deferReply({flags:64});
-   const birthDate=i.fields.getTextInputValue('birthDate').trim(),rawGender=i.fields.getTextInputValue('gender').trim(),gender=rawGender==='남자'?'male':rawGender==='여자'?'female':'';
-   if(!/^\d{4}-\d{2}-\d{2}$/.test(birthDate)||!gender){await i.editReply('생년월일은 YYYY-MM-DD, 성별은 남자 또는 여자로 입력해 주세요.');return;}
+   const rawBirthDate=i.fields.getTextInputValue('birthDate').trim(),birthParts=rawBirthDate.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})$/)||rawBirthDate.match(/^(\d{4})(\d{2})(\d{2})$/),birthDate=birthParts?birthParts[1]+'-'+birthParts[2].padStart(2,'0')+'-'+birthParts[3].padStart(2,'0'):'',rawGender=i.fields.getTextInputValue('gender').trim(),gender=rawGender==='남자'?'male':rawGender==='여자'?'female':'';
+   if(!/^\d{4}-\d{2}-\d{2}$/.test(birthDate)||!gender){await i.editReply('생년월일은 2009-07-05 또는 20090705처럼 끝까지 입력하고, 성별은 남자 또는 여자로 입력해 주세요.');return;}
    await serial(i.user.id,async()=>{await flushDeparture(i.user.id);await i.guild.members.fetch({user:i.user.id,force:true});await bridge(ENDPOINT,{action:'submit',guildId:GUILD,userId:i.user.id,birthDate,gender,at:Date.now()});pendingChecks.add(i.user.id);await reconcile(await i.guild.members.fetch({user:i.user.id,force:true}));});
    if(client.__syncCommunityDemographics)await client.__syncCommunityDemographics(i.user.id);
    await i.editReply('가입 정보를 저장했습니다. 홈페이지 설정 → 개인정보에서 확인할 수 있습니다.');
