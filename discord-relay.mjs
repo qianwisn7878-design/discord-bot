@@ -3,6 +3,7 @@ import {executeScrimVoice} from './scrim-voice-relay.mjs';
 const GUILDS=new Set(['1492461447568162876','1554439098490429442','1554439352652922891','1563217788288499813','1477820654739787858']);
 const outboundDMs=new Set();
 const publicChannel=name=>new Set(['📣・공지-소식','📝・모집-게시판','📅・일정-이벤트']).has(name)||String(name||'').includes('포인트-상점');
+const scrimRecordChannel=channel=>channel.guild_id==='1492461447568162876'&&channel.type===0&&['스크림-기록','스크림 기록'].includes(channel.name);
 const managedName=name=>/^(내전|스크림|[AB]팀)\s/.test(name||'')||/^밴픽-[a-f0-9]{8}$/.test(name||'');
 const forbiddenPermissions=8n|32n|268435456n|536870912n;
 export async function validateRelayJob(client,job){
@@ -36,7 +37,7 @@ export async function validateRelayJob(client,job){
  if(parts[0]==='channels'&&/^\d{17,20}$/.test(parts[1]||'')){
   const channel=await client.rest.get('/channels/'+parts[1]);
   if(channel.type===1){if(parts[2]==='messages'&&job.method==='POST'&&outboundDMs.has(channel.id))return;throw Error('DM 조회·수정은 허용하지 않습니다.');}
-  if(!GUILDS.has(channel.guild_id)||(!STATIC_DISCORD_IDS.has(channel.id)&&!managedName(channel.name)&&!publicChannel(channel.name)))throw Error('허용된 ETG 채널만 접근할 수 있습니다.');
+  if(!GUILDS.has(channel.guild_id)||(!STATIC_DISCORD_IDS.has(channel.id)&&!managedName(channel.name)&&!publicChannel(channel.name)&&!scrimRecordChannel(channel)))throw Error('허용된 ETG 채널만 접근할 수 있습니다.');
   if(parts.length===2&&job.method==='GET')return {prefetched:channel};
   if(parts.length===2&&job.method==='DELETE'&&[0,2].includes(channel.type)&&managedName(channel.name))return;
   if(parts[2]==='messages'&&parts.length<=4){if(parts[3]&&['PATCH','DELETE'].includes(job.method)){const message=await client.rest.get('/channels/'+parts[1]+'/messages/'+parts[3]);if(message.author?.id!==client.user.id)throw Error('봇이 작성한 메시지만 수정·삭제할 수 있습니다.');}return;}
