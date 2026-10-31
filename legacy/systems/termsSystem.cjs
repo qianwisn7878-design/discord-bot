@@ -408,6 +408,7 @@ async function handleReactionRemove(
     }
 }
 async function startTermsSystem(client) {
+    startCommunityTermsSystem(client);
     await createTermsMessages(
         client
     );
@@ -424,3 +425,62 @@ async function startTermsSystem(client) {
     );
 }
 module.exports = {startTermsSystem,createTermsMessages};
+
+const COMMUNITY_TERMS={guild:'1554439098490429442',channel:'1556927431502340150',agreed:'1566006162112122942',pending:'1565936804811776180'};
+let communityTermsMessageId=null,communityTermsSetup=null;
+const communityTermsQueues=new Map();
+async function ensureCommunityTermsMessage(client){
+ if(communityTermsSetup)return communityTermsSetup;
+ communityTermsSetup=(async()=>{
+  const channel=await client.channels.fetch(COMMUNITY_TERMS.channel);
+  if(!channel?.isTextBased()||channel.guildId!==COMMUNITY_TERMS.guild)throw Error('커뮤니티 약관 채널을 확인하세요.');
+  if(communityTermsMessageId){try{const message=await channel.messages.fetch(communityTermsMessageId);await message.react(CHECK_EMOJI);return message;}catch(e){if(e.code!==10008&&e.status!==404)throw e;communityTermsMessageId=null;}}
+  let before;
+  for(let page=0;page<50;page++){
+   const messages=await channel.messages.fetch({limit:100,...(before?{before}:{})});
+   const existing=messages.find(m=>m.author.id===client.user.id&&m.content.startsWith('[ 필수 ] 이용약관 동의'));
+   if(existing){communityTermsMessageId=existing.id;await existing.react(CHECK_EMOJI);return existing;}
+   if(messages.size<100){
+    const message=await channel.send({content:'[ 필수 ] 이용약관 동의\n\n이 채널의 이용약관을 확인한 뒤, 동의하신다면 이 메시지에 ✅ 체크 반응을 눌러주세요.\n체크 반응을 취소하면 약관 미동의 상태로 돌아갑니다.',allowedMentions:{parse:[]}});
+    communityTermsMessageId=message.id;await message.react(CHECK_EMOJI);return message;
+   }
+   before=messages.last().id;
+  }
+  throw Error('약관 채널 기록 확인 범위를 초과했습니다. 중복 생성을 중단합니다.');
+ })();
+ try{return await communityTermsSetup;}finally{communityTermsSetup=null;}
+}
+async function setCommunityConsent(member,agreed){
+ const add=agreed?COMMUNITY_TERMS.agreed:COMMUNITY_TERMS.pending,remove=agreed?COMMUNITY_TERMS.pending:COMMUNITY_TERMS.agreed;
+ const wasAgreed=member.roles.cache.has(COMMUNITY_TERMS.agreed);
+ await member.roles.add(add,'커뮤니티 이용약관 '+(agreed?'동의':'미동의'));
+ await member.roles.remove(remove,'커뮤니티 이용약관 상태 변경');
+ if(agreed&&!wasAgreed){try{await member.send({content:'EnjoyTheGame 커뮤니티 이용약관에 동의하셨습니다.\n\n동의 시간: '+getKoreanTime()+'\n약관 확인: https://discord.com/channels/'+COMMUNITY_TERMS.guild+'/'+COMMUNITY_TERMS.channel,allowedMentions:{parse:[]}});}catch(e){console.error('[커뮤니티 약관] 확인 DM 전송 실패:',e.message);}}
+}
+function queueCommunityConsent(key,task){
+ const pending=(communityTermsQueues.get(key)||Promise.resolve()).catch(()=>{}).then(task);
+ communityTermsQueues.set(key,pending);
+ pending.catch(e=>console.error('[커뮤니티 약관]',e.message)).finally(()=>{if(communityTermsQueues.get(key)===pending)communityTermsQueues.delete(key);});
+ return pending;
+}
+async function communityTermsReaction(client,reaction,user,agreed){
+ if(user.bot||reaction.message.channelId!==COMMUNITY_TERMS.channel||!isCheckEmoji(reaction))return;
+ return queueCommunityConsent(user.id,async()=>{
+  if(reaction.partial)await reaction.fetch();
+  if(reaction.message.partial)await reaction.message.fetch();
+  const message=reaction.message;
+  if(message.guildId!==COMMUNITY_TERMS.guild||message.author?.id!==client.user.id)return;
+  if(!communityTermsMessageId)await ensureCommunityTermsMessage(client);
+  if(message.id!==communityTermsMessageId)return;
+  const member=await message.guild.members.fetch(user.id);
+  await setCommunityConsent(member,agreed);
+ });
+}
+function startCommunityTermsSystem(client){
+ if(client.__communityTermsInstalled)return;client.__communityTermsInstalled=true;
+ client.on(Events.MessageReactionAdd,(reaction,user)=>{communityTermsReaction(client,reaction,user,true).catch(e=>console.error('[커뮤니티 약관]',e.message));});
+ client.on(Events.MessageReactionRemove,(reaction,user)=>{communityTermsReaction(client,reaction,user,false).catch(e=>console.error('[커뮤니티 약관]',e.message));});
+ client.on(Events.GuildMemberAdd,member=>{if(member.user.bot||member.guild.id!==COMMUNITY_TERMS.guild)return;queueCommunityConsent(member.id,()=>setCommunityConsent(member,false));});
+ const refresh=()=>ensureCommunityTermsMessage(client).catch(e=>console.error('[커뮤니티 약관] 안내 생성 실패:',e.message));
+ refresh();const timer=setInterval(refresh,300000);timer.unref?.();
+}
