@@ -17,7 +17,7 @@ export function createInfoPanelRecovery(client,{senders=null,read=readMetadata,w
     let existing=known.find(message=>matches(message,prefix,client.user.id));
     const previous=file?read(file):null;
     if(!existing&&previous?.messageId){try{const message=await channel.messages.fetch(previous.messageId);if(matches(message,prefix,client.user.id))existing=message;}catch(error){if(error.status!==404&&error.code!==10008)throw error;}}
-    if(existing){if(file)write(file,{sent:true,channelId:CHANNEL,messageId:existing.id});continue;}
+    if(existing){if(moduleName==='ageSystem'&&!senders)await require('./legacy/systems/ageSystem.cjs').refreshAgeMessage(client,existing);if(file)write(file,{sent:true,channelId:CHANNEL,messageId:existing.id});continue;}
     if(file)write(file,{sent:false,channelId:CHANNEL,messageId:null});
     let posted=null;
     const wrapped=new Proxy(channel,{get(target,key){if(key==='send')return async body=>{const message=await target.send(body);if(matches(message,prefix,client.user.id))posted=message;return message;};const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value;}});
