@@ -1,192 +1,25 @@
-const {
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle,
-    EmbedBuilder
-} = require('discord.js');
-const CHANNEL_ID = '1510258999529046116';
-const AGE_ROLES = {
-    '98': '1546291224648880259',
-    '99': '1546291305964109884',
-    '00': '1536798154681229312',
-    '01': '1536798154077511740',
-    '02': '1536798152923807915',
-    '03': '1536798152185745438',
-    '04': '1536798151879565362',
-    '05': '1536798151061540914',
-    '06': '1536798150487048212',
-    '07': '1536798146863304724',
-    '08': '1536798146804580412',
-    '09': '1536798142018752602',
-    '10': '1536798139296514088',
-    '11': '1536798130803314802'
-};
-const AGES = [
-    '11',
-    '10',
-    '09',
-    '08',
-    '07',
-    '06',
-    '05',
-    '04',
-    '03',
-    '02',
-    '01',
-    '00',
-    '99',
-    '98'
-];
-function createAgeButtons() {
-    const rows = [];
-    for (let i = 0; i < AGES.length; i += 5) {
-        const row = new ActionRowBuilder();
-        for (
-            let j = i;
-            j < Math.min(i + 5, AGES.length);
-            j++
-        ) {
-            const age = AGES[j];
-            row.addComponents(
-                new ButtonBuilder()
-                    .setCustomId(`age_select_${age}`)
-                    .setLabel(age)
-                    .setStyle(ButtonStyle.Primary)
-            );
-        }
-        rows.push(row);
-    }
-    return rows;
+const {ActionRowBuilder,ButtonBuilder,ButtonStyle,EmbedBuilder}=require('discord.js');
+const CHANNEL_ID='1510258999529046116';
+const AGES=Array.from({length:23},(_,i)=>String((2012-i)%100).padStart(2,'0'));
+const roleJobs=new Map(),memberJobs=new Map();
+function ageFromRole(role){const match=/^(?:19|20)?(\d{2})년생$/.exec(String(role.name||'').replace(/\s+/g,''));return match&&AGES.includes(match[1])?match[1]:null;}
+async function ensureAgeRoles(guild){
+ if(roleJobs.has(guild.id))return roleJobs.get(guild.id);
+ const task=(async()=>{const roles=await guild.roles.fetch(),found=new Map();for(const role of roles.values()){const age=ageFromRole(role);if(age&&!role.managed&&!found.has(age))found.set(age,role);}
+ for(const age of AGES)if(!found.has(age))found.set(age,await guild.roles.create({name:age+'년생',permissions:0n,mentionable:false,hoist:false,reason:'ETG 출생연도 선택 범위 1990~2012년 확장'}));return found;})();
+ roleJobs.set(guild.id,task);try{return await task;}finally{if(roleJobs.get(guild.id)===task)roleJobs.delete(guild.id);}
 }
-async function sendAgeMessage(client) {
-    try {
-        const channel =
-            await client.channels.fetch(CHANNEL_ID);
-        if (!channel) {
-            console.error(
-                '[나이시스템] 채널을 찾을 수 없습니다.'
-            );
-            return;
-        }
-        const embed = new EmbedBuilder()
-            .setTitle('본인 나이를 고르세요')
-            .setDescription(
-                '본인 나이 고르쇼'
-            );
-        const message = await channel.send({
-            embeds: [embed],
-            components: createAgeButtons()
-        });
-        console.log(
-            `[나이시스템] 나이 선택 메시지 생성 완료: ${message.id}`
-        );
-    } catch (error) {
-        console.error(
-            '[나이시스템] 메시지 생성 실패:',
-            error
-        );
-    }
+function agePayload(){const rows=[];for(let i=0;i<AGES.length;i+=5)rows.push(new ActionRowBuilder().addComponents(...AGES.slice(i,i+5).map(age=>new ButtonBuilder().setCustomId('age_select_'+age).setLabel(age+'년생').setStyle(ButtonStyle.Primary))));return {embeds:[new EmbedBuilder().setTitle('출생연도를 선택하세요').setDescription('1990년생부터 2012년생까지 선택할 수 있습니다.\n가입 조건은 만 14세 이상입니다. 2012년생은 생일이 지나 만 14세가 된 경우에만 선택해 주세요.\n출생연도 역할은 한 개만 받을 수 있습니다.')],components:rows,allowedMentions:{parse:[]}};}
+async function refreshAgeMessage(client,message){const guild=message.guild||await client.guilds.fetch(message.guildId);await ensureAgeRoles(guild);const payload=agePayload(),wanted=payload.components.flatMap(row=>row.toJSON().components.map(c=>c.custom_id)),actual=(message.components||[]).flatMap(row=>(row.components||[]).map(c=>c.customId||c.custom_id));if(JSON.stringify(wanted)!==JSON.stringify(actual))await message.edit(payload);}
+async function sendAgeMessage(client){const channel=await client.channels.fetch(CHANNEL_ID);if(!channel)throw Error('나이 선택 채널을 찾을 수 없습니다.');await ensureAgeRoles(channel.guild);return channel.send(agePayload());}
+async function handleAgeButton(interaction){
+ if(!interaction.isButton()||!interaction.customId.startsWith('age_select_'))return false;
+ const match=/^age_select_(\d{2})(_confirm)?$/.exec(interaction.customId);if(!match||!AGES.includes(match[1])){await interaction.reply({content:'출생연도를 다시 선택해 주세요.',ephemeral:true});return true;}
+ const age=match[1];if(age==='12'&&!match[2]){await interaction.reply({content:'2012년생은 생일이 지나 만 14세 이상이어야 가입할 수 있습니다. 해당 조건을 충족하나요?',ephemeral:true,components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('age_select_12_confirm').setLabel('생일이 지났고 만 14세 이상입니다').setStyle(ButtonStyle.Primary))]});return true;}
+ await interaction.deferReply({ephemeral:true});
+ const key=interaction.guildId+':'+interaction.user.id,previous=memberJobs.get(key)||Promise.resolve();
+ const task=previous.catch(()=>{}).then(async()=>{const roles=await ensureAgeRoles(interaction.guild),member=await interaction.guild.members.fetch(interaction.user.id),existing=[...member.roles.cache.values()].find(r=>ageFromRole(r));if(existing){await interaction.editReply('이미 출생연도 역할 **'+existing.name+'**을 가지고 있습니다. 출생연도 역할은 한 개만 받을 수 있습니다.');return;}
+ const role=roles.get(age);if(!role?.editable)throw Error('봇의 역할을 출생연도 역할보다 위로 배치하고 역할 관리 권한을 확인해 주세요.');await member.roles.add(role,'출생연도 선택 시스템');await interaction.editReply('✅ **'+age+'년생** 역할을 추가했습니다.');});
+ memberJobs.set(key,task);try{await task;}catch(error){await interaction.editReply('역할 지급에 실패했습니다. '+error.message);}finally{if(memberJobs.get(key)===task)memberJobs.delete(key);}return true;
 }
-async function handleAgeButton(interaction) {
-    if (
-        !interaction.isButton() ||
-        !interaction.customId.startsWith('age_select_')
-    ) {
-        return false;
-    }
-    const age =
-        interaction.customId.replace(
-            'age_select_',
-            ''
-        );
-    const roleId = AGE_ROLES[age];
-    if (!roleId) {
-        await interaction.reply({
-            content:
-                '해당 나이의 역할이 설정되어 있지 않습니다.',
-            ephemeral: true
-        });
-        return true;
-    }
-    const member =
-        await interaction.guild.members
-            .fetch(interaction.user.id)
-            .catch(() => null);
-    if (!member) {
-        await interaction.reply({
-            content:
-                '유저 정보를 불러오지 못했습니다.',
-            ephemeral: true
-        });
-        return true;
-    }
-    const existingAgeRoleId =
-        Object.values(AGE_ROLES).find(
-            id => member.roles.cache.has(id)
-        );
-    if (existingAgeRoleId) {
-        const existingRole =
-            interaction.guild.roles.cache.get(
-                existingAgeRoleId
-            );
-        await interaction.reply({
-            content:
-                `이미 나이 역할 **${existingRole?.name || '등록된 나이'}**을 가지고 있습니다.\n\n` +
-                '나이 역할은 하나만 가질 수 있습니다.',
-            ephemeral: true
-        });
-        return true;
-    }
-    const role =
-        interaction.guild.roles.cache.get(roleId);
-    if (!role) {
-        await interaction.reply({
-            content:
-                `**${age}** 나이 역할을 찾을 수 없습니다.\n` +
-                `역할 ID: ${roleId}`,
-            ephemeral: true
-        });
-        return true;
-    }
-    if (!role.editable) {
-        await interaction.reply({
-            content:
-                `**${role.name}** 역할을 지급할 수 없습니다.\n\n` +
-                '봇의 역할이 해당 나이 역할보다 위에 있는지 확인해주세요.',
-            ephemeral: true
-        });
-        return true;
-    }
-    try {
-        await member.roles.add(
-            role,
-            '나이 선택 시스템'
-        );
-        await interaction.reply({
-            content:
-                `✅ **${age}** 나이 역할을 추가했습니다.`,
-            ephemeral: true
-        });
-        console.log(
-            `[나이시스템] ${interaction.user.tag} → ${age}`
-        );
-    } catch (error) {
-        console.error(
-            '[나이시스템] 역할 추가 실패:',
-            error
-        );
-        if (!interaction.replied) {
-            await interaction.reply({
-                content:
-                    '역할을 추가하지 못했습니다.\n' +
-                    '봇의 역할 위치와 Manage Roles 권한을 확인해주세요.',
-                ephemeral: true
-            });
-        }
-    }
-    return true;
-}
-module.exports = {
-    sendAgeMessage,
-    handleAgeButton
-};
+module.exports={sendAgeMessage,handleAgeButton,refreshAgeMessage,ensureAgeRoles,agePayload,ageFromRole};
