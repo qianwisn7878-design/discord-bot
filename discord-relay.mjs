@@ -37,7 +37,7 @@ export async function validateRelayJob(client,job){
  if(parts[0]==='channels'&&/^\d{17,20}$/.test(parts[1]||'')){
   const channel=await client.rest.get('/channels/'+parts[1]);
   if(channel.type===1){if(parts[2]==='messages'&&job.method==='POST'&&outboundDMs.has(channel.id))return;throw Error('DM 조회·수정은 허용하지 않습니다.');}
-  if(channel.id==='1563440545240453231'&&channel.guild_id==='1554439098490429442'&&channel.type===0&&parts[2]==='messages'&&parts.length===3&&job.method==='POST')return;
+  if(channel.id==='1563440545240453231'&&channel.guild_id==='1554439098490429442'&&channel.type===0&&parts[2]==='messages'){if(parts.length===3&&job.method==='POST')return;if(parts.length===4&&job.method==='PATCH'){const message=await client.rest.get('/channels/'+channel.id+'/messages/'+parts[3]);if(message.author?.id!==client.user.id)throw Error('봇이 작성한 지원서만 수정할 수 있습니다.');return;}}
   if(!GUILDS.has(channel.guild_id)||(!STATIC_DISCORD_IDS.has(channel.id)&&!managedName(channel.name)&&!publicChannel(channel.name)&&!scrimRecordChannel(channel)))throw Error('허용된 ETG 채널만 접근할 수 있습니다.');
   if(parts.length===2&&job.method==='GET')return {prefetched:channel};
   if(parts.length===2&&job.method==='DELETE'&&[0,2].includes(channel.type)&&managedName(channel.name))return;
