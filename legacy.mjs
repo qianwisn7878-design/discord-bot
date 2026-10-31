@@ -43,10 +43,11 @@ export async function installLegacy(client,bridge,{members,content}){
   }
   return true;
  };
- const scopedListener=(fn,once=false)=>(...args)=>{
-  const guild=args.map(a=>a?.guild?.id||a?.guildId||a?.message?.guild?.id).find(Boolean);if(guild&&!GUILDS.has(guild))return;
+ const scopedListener=(fn,once=false,communityTerms=false)=>(...args)=>{
+  const guild=args.map(a=>a?.guild?.id||a?.guildId||a?.message?.guild?.id||a?.message?.guildId).find(Boolean);if(guild&&!GUILDS.has(guild)&&!(communityTerms&&guild==='1554439098490429442'))return;
   Promise.resolve().then(()=>fn(...args)).then(()=>flush()).catch(error=>{status.errors.push(String(error.message).slice(0,180));status.errors=status.errors.slice(-10);console.error('[기존 봇 기능] '+error.message);});
  };
+ scoped.__termsOn=(event,fn)=>{if(!['messageReactionAdd','messageReactionRemove','guildMemberAdd','guildMemberRemove'].includes(event))throw Error('지원하지 않는 약관 이벤트');client.on(event,scopedListener(fn,false,true));return scoped;};
  scoped.on=(event,fn)=>{client.on(event,scopedListener(fn));return scoped;};
  scoped.once=(event,fn)=>{client.once(event,scopedListener(fn,true));return scoped;};
  require('./legacy/bootstrap.cjs')(scoped);client.legacyCommands=scoped.legacyCommands;
