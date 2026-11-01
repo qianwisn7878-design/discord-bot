@@ -28,8 +28,10 @@ export function installDemographicSync(client,bridge){
  client.on('roleDelete',role=>{if(DEMOGRAPHIC_GUILDS.includes(role.guild.id))catalogs.delete(role.guild.id);});
  client.on('guildMemberAdd',member=>{if(DEMOGRAPHIC_GUILDS.includes(member.guild.id)&&!member.user.bot)schedule(member.id).catch(()=>{});});
  client.on('guildMemberRemove',member=>{if(member.guild.id===COMMUNITY)pending.add(member.id);});
- client.once('clientReady',()=>{(async()=>{const users=new Set();for(const id of DEMOGRAPHIC_GUILDS){const guild=client.guilds.cache.get(id);if(!guild)continue;try{await catalog(guild);const members=await guild.members.fetch();for(const member of members.values())if(!member.user.bot)users.add(member.id);}catch(e){error(e);}}for(const id of users)await schedule(id).catch(()=>{});})().catch(error);});
- let periodicRunning=false;const periodic=setInterval(async()=>{if(periodicRunning)return;periodicRunning=true;try{const users=new Set();for(const id of DEMOGRAPHIC_GUILDS)for(const member of client.guilds.cache.get(id)?.members.cache.values()||[])if(!member.user.bot)users.add(member.id);for(const id of users)await schedule(id).catch(()=>{});}finally{periodicRunning=false;}},60000);periodic.unref?.();
+
+ let periodicRunning=false;
+ async function sweep(){if(periodicRunning||!client.isReady())return;periodicRunning=true;let synced=0,failed=0;const users=new Set();try{for(const id of DEMOGRAPHIC_GUILDS){const guild=client.guilds.cache.get(id);if(!guild)continue;try{let after='0';for(let page=0;page<100;page++){const batch=await client.rest.get('/guilds/'+id+'/members?limit=1000&after='+after);for(const m of batch)if(!m.user.bot)users.add(m.user.id);if(batch.length<1000)break;after=batch.at(-1).user.id;}}catch(e){failed++;error(e);}}for(const id of users){try{await schedule(id);synced++;}catch{failed++;}}console.log('[가입 정보 역할 연동] 홈페이지 기준 확인 '+users.size+'명 / 완료 '+synced+'명 / 오류 '+failed+'건');}finally{periodicRunning=false;}}
+ client.once('clientReady',()=>void sweep().catch(error));const periodic=setInterval(()=>void sweep().catch(error),60000);periodic.unref?.();
  const timer=setInterval(()=>{for(const id of pending)schedule(id).catch(()=>{});for(const id of DEMOGRAPHIC_GUILDS){const guild=client.guilds.cache.get(id);if(guild&&!catalogs.has(id))catalog(guild).catch(error);}},60000);timer.unref?.();
  return {stop(){clearInterval(timer);clearInterval(periodic);},sync:schedule};
 }
