@@ -19,7 +19,8 @@ export function installDemographicSync(client,bridge){
  }
  async function sync(userId){
   const response=await bridge('/api/discord-bot/community-registration',{action:'demographics',guildId:COMMUNITY,userId,at:Date.now()});
-  for(const id of DEMOGRAPHIC_GUILDS){const guild=client.guilds.cache.get(id);if(!guild)continue;try{const member=await guild.members.fetch({user:userId,force:true});if(!member.user.bot&&(response.profile||response.clear))await apply(member,response.profile);}catch(e){if(e.code!==10007)throw e;}}
+  if(!Object.hasOwn(response,'profile')||(response.profile!==null&&(!BIRTH_YEARS.includes(response.profile?.birthYear)||!['male','female'].includes(response.profile?.gender))))throw Error('가입 정보 응답을 확인하지 못했습니다. 기존 역할을 유지합니다.');
+  const errors=[];for(const id of DEMOGRAPHIC_GUILDS){const guild=client.guilds.cache.get(id);if(!guild)continue;try{const member=await guild.members.fetch({user:userId,force:true});if(!member.user.bot)await apply(member,response.profile);}catch(e){if(e.code!==10007)errors.push(e);}}if(errors.length)throw errors[0];
   pending.delete(userId);
  }
  function schedule(userId){pending.add(userId);if(jobs.has(userId))return jobs.get(userId);const p=sync(userId).finally(()=>jobs.delete(userId));jobs.set(userId,p);p.catch(error);return p;}
