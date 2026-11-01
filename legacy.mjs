@@ -98,7 +98,7 @@ export async function syncWebsiteRosters(client,boards,storage={read,write}){
    const body={content:pages[index],allowedMentions:{parse:[],repliedUser:false},attachments:[],embeds:[]};
    let message=messages[index];
    if(message)await message.edit(body);
-   else{const nonce=createHash('sha256').update(board.channelId+':'+board.key+':'+hash+':'+index).digest('hex').slice(0,24);message=await channel.send({content:body.content,allowedMentions:body.allowedMentions,embeds:[],reply:{messageReference:next[index-1],failIfNotExists:false},nonce,enforceNonce:true});}
+   else{const nonce=createHash('sha256').update(board.channelId+':'+board.key+':'+hash+':'+index).digest('hex').slice(0,24);message=await channel.send({content:body.content,allowedMentions:body.allowedMentions,embeds:[],nonce,enforceNonce:true});}
    next.push(message.id);
    runtime.rosterBoards[board.key]={channelId:board.channelId,messageIds:[...next,...messages.slice(index+1).map(m=>m.id)],hash:null,sourceVersion,sourceAt};
    storage.write('runtime.json',runtime);
