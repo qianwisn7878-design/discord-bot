@@ -1,12 +1,14 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import crypto from 'node:crypto';import {createRequire} from 'node:module';
 import {syncWebsiteRosters} from '../legacy.mjs';
 const require=createRequire(import.meta.url),{google}=require('../legacy/google-client.cjs');
-function fixture(sections, existing=true){
- let runtime={},edits=[],scans=0;
- const message={id:'m',author:{id:'bot'},content:'**홈페이지 연동 명단 · 프리미어 팀**',edit:async body=>{edits.push(body);message.content=body.content;}};
- const channel={guildId:'1492461447568162876',messages:{fetch:async query=>typeof query==='object'?(scans++,new Map(existing?[[message.id,message]]:[])):existing?message:null},send:async()=>{throw Error('must never send a new roster message');}};
- return {edits,client:{user:{id:'bot'},channels:{fetch:async()=>channel}},storage:{read:()=>structuredClone(runtime),write:(_,value)=>runtime=structuredClone(value)},board:{key:'premier',channelId:'1563935082278821912',sourceAt:200,sourceVersion:1,sections}};
+function fixture(sections,existing=true){
+ let runtime={},edits=[],sends=[],deletes=[],serial=0;const messages=new Map();
+ const make=(id,content)=>({id,author:{id:'bot'},content,edit:async function(body){edits.push(body);this.content=body.content;},delete:async()=>{deletes.push(id);messages.delete(id);}});
+ if(existing)messages.set('m',make('m','**홈페이지 연동 명단 · 프리미어 팀**'));
+ const channel={guildId:'1492461447568162876',messages:{fetch:async query=>typeof query==='object'?new Map(messages):messages.get(query)},send:async body=>{sends.push(body);const m=make('m'+(++serial),body.content);messages.set(m.id,m);return m;}};
+ return {edits,sends,deletes,messages,client:{user:{id:'bot'},channels:{fetch:async()=>channel}},storage:{read:()=>structuredClone(runtime),write:(_,value)=>runtime=structuredClone(value)},board:{key:'premier',channelId:'1563935082278821912',sourceAt:200,sourceVersion:1,sections}};
 }
+
 test('existing roster is discovered and edited; full plain text stays in one message without files or embeds',async()=>{
  const f=fixture([{title:'중급',lines:['x'.repeat(1850),'synthetic-player-last']}]);
  await syncWebsiteRosters(f.client,[f.board],f.storage);
@@ -15,7 +17,7 @@ test('existing roster is discovered and edited; full plain text stays in one mes
  f.board.sections=[{title:'초급',lines:['new-player']}];await syncWebsiteRosters(f.client,[f.board],f.storage);
  assert(f.edits.at(-1).content.includes('new-player'));assert.deepEqual(f.edits.at(-1).attachments,[]);
 });
-test('over 2000 characters preserves the existing message without sending or attaching anything',async()=>{const f=fixture([{title:'team',lines:['x'.repeat(2000)]}]);await assert.rejects(()=>syncWebsiteRosters(f.client,[f.board],f.storage),/2,000/);assert.equal(f.edits.length,0);});
+test('over 2000 characters continues as linked replies and shrinks cleanly',async()=>{const f=fixture([{title:'team',lines:Array.from({length:40},(_,i)=>'player-'+i+' '+('가'.repeat(100)))}]);await syncWebsiteRosters(f.client,[f.board],f.storage);assert(f.sends.length>=2);assert([...f.edits,...f.sends].every(b=>b.content.length<=2000));assert.equal(f.sends[0].reply.messageReference,'m');assert.equal(f.sends[1].reply.messageReference,'m1');assert.equal(f.sends[0].allowedMentions.repliedUser,false);assert([...f.messages.values()].some(m=>m.content.includes('player-39')));const sent=f.sends.length;await syncWebsiteRosters(f.client,[f.board],f.storage);assert.equal(f.sends.length,sent);f.board.sourceVersion++;f.board.sections=[{title:'team',lines:['short']}];await syncWebsiteRosters(f.client,[f.board],f.storage);assert.equal(f.messages.size,1);assert.equal(f.deletes.length,sent);});
 test('missing or deleted roster is never recreated',async()=>{
  const f=fixture([{title:'중급',lines:[]}],false);await syncWebsiteRosters(f.client,[f.board],f.storage);assert.equal(f.edits.length,0);
 });
