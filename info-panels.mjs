@@ -2,6 +2,7 @@ import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} fro
 import {createRosterRefresh} from './roster-refresh.mjs';
 const require=createRequire(import.meta.url),CHANNEL='1510258999529046116',TERMS_CHANNEL='1551594410754580481',dir=fileURLToPath(new URL('./legacy/data/',import.meta.url));
 const definitions=[['ageMessage.json','age_select_','ageSystem','sendAgeMessage'],['genderMessage.json','gender_','genderSystem','sendGenderMessage'],['tierMessage.json','tier_select_','tierSystem','sendTierMessage'],['valorantNicknameMessage.json','valorant_nickname_write','valorantNicknameSystem','sendValorantNicknameMessage'],['activityTimeMessage.json','activity_time_write','activityTimeSystem','sendActivityTimeMessage'],['phoneMessage.json','phone_write','phoneSystem','startPhoneSystem']];
+const retired=definitions.splice(0,5),retiredPrefixes=[...retired.map(d=>d[1]),'position_'];
 const allowed=new Set(definitions.map(d=>d[0]).filter(Boolean));
 function readMetadata(file){if(!allowed.has(file))throw Error('안내 메시지 기록만 확인할 수 있습니다.');try{return JSON.parse(fs.readFileSync(path.join(dir,file),'utf8'));}catch{return {};}}
 function writeMetadata(file,value){if(!allowed.has(file))throw Error('안내 메시지 기록만 초기화할 수 있습니다.');fs.mkdirSync(dir,{recursive:true});const target=path.join(dir,file);fs.writeFileSync(target+'.tmp',JSON.stringify(value));fs.renameSync(target+'.tmp',target);}
@@ -13,6 +14,8 @@ export function createInfoPanelRecovery(client,{senders=null,read=readMetadata,w
   task=(async()=>{
    const channel=await client.channels.fetch(CHANNEL);if(!channel?.isTextBased()||(channel.guildId||channel.guild?.id)!=='1492461447568162876')throw Error('정보 입력 안내 채널을 확인하세요.');
    const messages=await channel.messages.fetch({limit:100}),known=[...messages.values()];let created=0;
+let before;for(let page=0;page<100;page++){const batch=page===0?messages:await channel.messages.fetch({limit:100,before});for(const message of batch.values())if(retiredPrefixes.some(prefix=>matches(message,prefix,client.user.id)))await message.delete();if(batch.size<100)break;before=[...batch.values()].at(-1).id;}
+
    for(const [file,prefix,moduleName,method] of definitions){
     let existing=known.find(message=>matches(message,prefix,client.user.id));
     const previous=file?read(file):null;
