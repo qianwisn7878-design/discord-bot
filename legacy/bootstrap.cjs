@@ -14,6 +14,8 @@ module.exports=function installLegacy(client){
  client.on(Events.InteractionCreate,async interaction=>{
   if(!client.__isLegacyInteraction(interaction)||!await client.__authorizeLegacy(interaction))return;
   const id=interaction.customId||'';
+if(interaction.guildId==='1492461447568162876'&&(/^(age_select_|gender_|valorant_nickname_|activity_time_|tier_select_|tier_grade_|tier_back$|position_)/.test(id)||(interaction.isChatInputCommand()&&interaction.commandName==='정보추가'&&['닉네임','나이','성별','발로란트 티어','포지션','활동시간'].includes(interaction.options.getString('항목')))))return interaction.reply({content:'이 정보는 커뮤니티 가입 정보와 홈페이지 설정에서 자동으로 연동됩니다.',flags:64});
+
   if(interaction.isModalSubmit()){if(id==='phone_modal')return phone.handlePhoneModal(interaction);if(id==='valorant_nickname_modal')return nickname.handleValorantNicknameModal(interaction);if(id==='activity_time_modal_step1')return activity.handleActivityTimeModalStep1(interaction);if(id==='activity_time_modal_step2')return activity.handleActivityTimeModalStep2(interaction);}
   if(interaction.isButton()){
    if(id==='phone_write')return phone.handlePhoneButton(interaction);if(id==='valorant_nickname_write')return nickname.handleValorantNicknameButton(interaction);if(id==='activity_time_write')return activity.handleActivityTimeButton(interaction);if(id==='activity_time_step2_open')return activity.handleActivityTimeStep2Button(interaction);
