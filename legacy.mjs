@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {syncGuildCommands} from './command-sync.mjs';
 import fs from 'node:fs';
 import {createInfoPanelRecovery} from './info-panels.mjs';
@@ -73,28 +74,36 @@ export async function installLegacy(client,bridge,{members,content}){
  return {status,flush,ensureInfoPanels:async()=>{await infoPanels.ensure();await flush();},syncRosters:boards=>{const task=rosterQueue.then(async()=>{await syncWebsiteRosters(client,boards);await flush();status.rosterSyncAt=new Date().toISOString();});rosterQueue=task.catch(()=>{});return task;},stop:async()=>{clearInterval(timer);infoPanels.stop();await flush();}};
 }
 
+export function splitRosterText(text,limit=1900){const pages=[];let current='';for(const line of String(text).split('\n')){const value=(current?'\n':'')+line;if(current.length+value.length<=limit){current+=value;continue;}if(current){pages.push(current);current='';}for(const char of line){if(current.length+char.length>limit){pages.push(current);current='';}current+=char;}}if(current||!pages.length)pages.push(current);return pages;}
 export async function syncWebsiteRosters(client,boards,storage={read,write}){
  if(!Array.isArray(boards))return;
  const runtime=storage.read('runtime.json');runtime.rosterBoards||={};
  for(const board of boards){
   if(!['general','premier','tiers'].includes(board.key)||!/^\d{17,20}$/.test(board.channelId||'')||!Array.isArray(board.sections))continue;
-  const title={general:'운영진·역할',premier:'프리미어 팀',tiers:'팀 티어'}[board.key],lines=['**홈페이지 연동 명단 · '+title+'**','홈페이지에서 수정한 내용이 자동 반영됩니다.'];
-  for(const section of board.sections)lines.push('\n**'+String(section.title||'').replace(/([\\*_~`>|])/g,'\\$1')+'**',...(section.lines?.length?section.lines:['미배치']));
-  const content=lines.join('\n');
-  if(content.length>2000)throw Error('명단이 Discord 일반 메시지 2,000자 제한을 초과했습니다. 기존 메시지를 유지합니다.');
-  const hash=JSON.stringify(['plain-single-v1',content]),previous=runtime.rosterBoards[board.key]||{},sourceVersion=Number(board.sourceVersion)||0,sourceAt=Number(board.sourceAt)||0;
+  const title={general:'운영진·역할',premier:'프리미어 팀',tiers:'팀 티어'}[board.key],header='**홈페이지 연동 명단 · '+title+'**',lines=[header,'홈페이지에서 수정한 내용이 자동 반영됩니다.'];
+  for(const section of board.sections)lines.push('\n**'+String(section.title||'').replace(/([\\*_~\x60>|])/g,'\\$1')+'**',...(section.lines?.length?section.lines:['미배치']));
+  const content=lines.join('\n'),parts=content.length<=2000?[content]:splitRosterText(content),pages=parts.map((part,index)=>index===0?part:header+'\n**이어서 · '+(index+1)+'/'+parts.length+'**\n'+part);
+  const hash=JSON.stringify(['plain-linked-v2',pages]),previous=runtime.rosterBoards[board.key]||{},sourceVersion=Number(board.sourceVersion)||0,sourceAt=Number(board.sourceAt)||0;
   if((previous.sourceVersion||0)>sourceVersion||((previous.sourceVersion||0)===sourceVersion&&(previous.sourceAt||0)>sourceAt))continue;
   if(previous.hash===hash&&previous.channelId===board.channelId){if(previous.sourceVersion!==sourceVersion||previous.sourceAt!==sourceAt){runtime.rosterBoards[board.key]={...previous,sourceVersion,sourceAt};storage.write('runtime.json',runtime);}continue;}
   const channel=await client.channels.fetch(board.channelId);if((channel.guildId||channel.guild?.id)!=='1492461447568162876')throw Error('명단 대상은 ETG 팀 서버의 채널이어야 합니다.');
   const ids=previous.channelId===board.channelId?previous.messageIds||[]:[],next=[],messages=[];
-  for(const id of ids){const message=await channel.messages.fetch(id).catch(()=>null);if(message?.author.id===client.user.id)messages.push(message);}
+  for(const id of ids){const message=await channel.messages.fetch(id).catch(error=>{if(error.code===10008||error.status===404)return null;throw error;});if(message?.author.id===client.user.id)messages.push(message);}
   if(!messages.length){
    const recent=await channel.messages.fetch({limit:100});
-   messages.push(...[...recent.values()].filter(m=>m.author.id===client.user.id&&m.content?.startsWith(lines[0])).sort((a,b)=>a.id.localeCompare(b.id)));
+   messages.push(...[...recent.values()].filter(m=>m.author.id===client.user.id&&m.content?.startsWith(header)).sort((a,b)=>a.id.length-b.id.length||a.id.localeCompare(b.id)));
   }
-  if(!messages.length)continue; // Existing roster messages only; never repost deleted boards.
-  const message=messages[0];
-  await message.edit({content,allowedMentions:{parse:[]},attachments:[],embeds:[]});next.push(message.id);
+  if(!messages.length)continue;
+  for(let index=0;index<pages.length;index++){
+   const body={content:pages[index],allowedMentions:{parse:[],repliedUser:false},attachments:[],embeds:[]};
+   let message=messages[index];
+   if(message)await message.edit(body);
+   else{const nonce=createHash('sha256').update(board.channelId+':'+board.key+':'+hash+':'+index).digest('hex').slice(0,24);message=await channel.send({content:body.content,allowedMentions:body.allowedMentions,embeds:[],reply:{messageReference:next[index-1],failIfNotExists:false},nonce,enforceNonce:true});}
+   next.push(message.id);
+   runtime.rosterBoards[board.key]={channelId:board.channelId,messageIds:[...next,...messages.slice(index+1).map(m=>m.id)],hash:null,sourceVersion,sourceAt};
+   storage.write('runtime.json',runtime);
+  }
+  for(const message of messages.slice(pages.length))await message.delete();
   runtime.rosterBoards[board.key]={channelId:board.channelId,messageIds:next,hash,sourceVersion,sourceAt};storage.write('runtime.json',runtime);
  }
 }
