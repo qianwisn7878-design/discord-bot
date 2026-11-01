@@ -8,13 +8,13 @@ function readMetadata(file){if(!allowed.has(file))throw Error('안내 메시지 
 function writeMetadata(file,value){if(!allowed.has(file))throw Error('안내 메시지 기록만 초기화할 수 있습니다.');fs.mkdirSync(dir,{recursive:true});const target=path.join(dir,file);fs.writeFileSync(target+'.tmp',JSON.stringify(value));fs.renameSync(target+'.tmp',target);}
 function matches(message,prefix,botId){return message?.author?.id===botId&&message.components?.some(row=>row.components?.some(component=>String(component.customId||component.custom_id||'').startsWith(prefix)));}
 export function createInfoPanelRecovery(client,{senders=null,read=readMetadata,write=writeMetadata,refreshTerms=null,onStatus=()=>{},onError=()=>{},...timers}={}){
- let task=null,stopped=false;
+ let task=null,stopped=false,retiredCleaned=false;
  const ensure=()=>{
   if(stopped)return Promise.resolve();if(task)return task;
   task=(async()=>{
    const channel=await client.channels.fetch(CHANNEL);if(!channel?.isTextBased()||(channel.guildId||channel.guild?.id)!=='1492461447568162876')throw Error('정보 입력 안내 채널을 확인하세요.');
    const messages=await channel.messages.fetch({limit:100}),known=[...messages.values()];let created=0;
-let before;for(let page=0;page<100;page++){const batch=page===0?messages:await channel.messages.fetch({limit:100,before});for(const message of batch.values())if(retiredPrefixes.some(prefix=>matches(message,prefix,client.user.id)))await message.delete();if(batch.size<100)break;before=[...batch.values()].at(-1).id;}
+if(!retiredCleaned){let before;for(let page=0;page<100;page++){const batch=page===0?messages:await channel.messages.fetch({limit:100,before});for(const message of batch.values())if(retiredPrefixes.some(prefix=>matches(message,prefix,client.user.id)))await message.delete();if(batch.size<100)break;before=[...batch.values()].at(-1).id;}retiredCleaned=true;}
 
    for(const [file,prefix,moduleName,method] of definitions){
     let existing=known.find(message=>matches(message,prefix,client.user.id));
