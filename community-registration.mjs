@@ -31,7 +31,7 @@ export function installCommunityRegistration(client,bridge,{queuePath=path.resol
  }
  function schedule(member){pendingChecks.add(member.id);return serial(member.id,()=>reconcile(member)).catch(error);}
  client.once('clientReady',()=>{ensurePanel().catch(error);(async()=>{const guild=await client.guilds.fetch(GUILD),members=await guild.members.fetch();for(const member of members.values())if(!member.user.bot)await schedule(member);})().catch(error);});
- client.on('guildMemberAdd',member=>{if(member.guild.id!==GUILD||member.user.bot)return;pendingChecks.add(member.id);serial(member.id,async()=>{await member.roles.add(PENDING,'커뮤니티 입장 기본 역할');await reconcile(member);}).catch(error);});
+ client.on('guildMemberAdd',member=>{if(member.guild.id!==GUILD||member.user.bot)return;pendingChecks.add(member.id);serial(member.id,async()=>{await flushDeparture(member.id);purgeLocalCommunityProfile(member.id);await bridge(ENDPOINT,{action:'joined',guildId:GUILD,userId:member.id,at:member.joinedTimestamp||Date.now()});await member.roles.add(PENDING,'커뮤니티 재입장: 기존 정보 초기화');if(member.roles.cache.has(JOINED))await member.roles.remove(JOINED,'커뮤니티 재입장: 가입 정보 재입력 필요');await reconcile(member);}).catch(error);});
  client.on('guildMemberUpdate',(oldMember,member)=>{if(member.guild.id!==GUILD||member.user.bot)return;if([AGREED,JOINED,PENDING].some(id=>oldMember.roles.cache.has(id)!==member.roles.cache.has(id)))schedule(member);});
 
  client.on('interactionCreate',async i=>{
