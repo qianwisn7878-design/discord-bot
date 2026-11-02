@@ -3,11 +3,17 @@ import path from 'node:path';
 const GUILD='1554439098490429442',CHANNEL='1566011543324201052',ENDPOINT='/api/discord-bot/community-registration';
 const AGREED='1566006162112122942',JOINED='1566010351177175040',PENDING='1566049064527855666';
 const BUTTON='etg:community-info:open',MODAL='etg:community-info:submit';
+export function purgeLocalCommunityProfile(id,file=new URL('./legacy/data/userInfo.json',import.meta.url)){
+ if(!/^\d{17,20}$/.test(id))throw Error('잘못된 Discord ID');
+ let data;try{data=JSON.parse(fs.readFileSync(file,'utf8'));}catch(e){if(e.code==='ENOENT')return;throw e;}
+ if(data.users)delete data.users[id];delete data[id];
+ fs.writeFileSync(file,JSON.stringify(data),{mode:0o600});
+}
 export function installCommunityRegistration(client,bridge,{queuePath=path.resolve('community-departures.json')}={}){
  const queues=new Map(),pendingChecks=new Set();let departures={};try{departures=JSON.parse(fs.readFileSync(queuePath,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
  const persist=()=>{fs.mkdirSync(path.dirname(queuePath),{recursive:true});fs.writeFileSync(queuePath+'.tmp',JSON.stringify(departures),{mode:0o600});fs.renameSync(queuePath+'.tmp',queuePath);};
  const serial=(id,task)=>{const p=(queues.get(id)||Promise.resolve()).catch(()=>{}).then(task);queues.set(id,p);p.catch(()=>{}).finally(()=>{if(queues.get(id)===p)queues.delete(id);});return p;};
- async function flushDeparture(id){if(!departures[id])return;const at=departures[id];await bridge(ENDPOINT,{action:'left',guildId:GUILD,userId:id,at});if(departures[id]===at){delete departures[id];persist();if(client.__syncCommunityDemographics)await client.__syncCommunityDemographics(id);}}
+ async function flushDeparture(id){if(!departures[id])return;const at=departures[id];purgeLocalCommunityProfile(id);await bridge(ENDPOINT,{action:'left',guildId:GUILD,userId:id,at});if(departures[id]===at){delete departures[id];persist();if(client.__syncCommunityDemographics)await client.__syncCommunityDemographics(id);}}
  let ensuring=null;
  function ensurePanel(){if(ensuring)return ensuring;ensuring=(async()=>{const channel=await client.channels.fetch(CHANNEL);if(channel?.guildId!==GUILD||!channel.isTextBased())throw Error('커뮤니티 가입 채널을 확인하세요.');let before;for(let page=0;page<50;page++){const messages=await channel.messages.fetch({limit:100,...(before?{before}:{})});const existing=messages.find(m=>m.author.id===client.user.id&&(m.content.startsWith('## 2. 정보 입력하기')||m.components.some(row=>row.components.some(c=>c.customId===BUTTON))));const body={content:'## 2. 정보 입력하기',allowedMentions:{parse:[]},components:[{type:1,components:[{type:2,style:1,label:'정보 입력하기',custom_id:BUTTON}]}]};if(existing){await existing.edit(body);return;}if(messages.size<100){await channel.send(body);return;}before=messages.last().id;}throw Error('가입 안내 기록 확인 범위를 초과했습니다.');})().finally(()=>{ensuring=null;});return ensuring;}
  const error=e=>console.error('[커뮤니티 가입]',e.status?'홈페이지 요청 실패 · HTTP '+e.status:e.message);
@@ -45,3 +51,4 @@ export function installCommunityRegistration(client,bridge,{queuePath=path.resol
  const timer=setInterval(()=>{if(client.isReady())ensurePanel().catch(error);for(const id of Object.keys(departures))serial(id,()=>flushDeparture(id)).catch(error);for(const id of pendingChecks)serial(id,async()=>{const guild=await client.guilds.fetch(GUILD);try{await reconcile(await guild.members.fetch({user:id,force:true}));}catch(e){if(e.code===10007){pendingChecks.delete(id);return;}throw e;}}).catch(error);},60000);timer.unref?.();
  return {stop(){clearInterval(timer);},ensurePanel};
 }
+
