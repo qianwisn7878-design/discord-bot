@@ -48,3 +48,9 @@ test('existing broad Admin and other-clan viewer overwrites are removed without 
  const {s,rest,channels}=setup();const result=await s.create(input(1)),c=channels[0];c.permission_overwrites.push({id:'r1',type:0,allow:'3072',deny:'0'},{id:'r3',type:0,allow:'3072',deny:'0'},{id:'quarantine',type:0,allow:'0',deny:'3072'});
  await s.transition(result.channelId,owner,true);assert(!c.permission_overwrites.some(x=>x.id==='r1'||x.id==='r3'));assert(c.permission_overwrites.some(x=>x.id==='quarantine'&&x.deny==='3072'));
 });
+
+test('first ticket message includes submitted contents and pings permitted staff roles once',async()=>{
+ const {s,rest}=setup(),post=rest.post.bind(rest),messages=[];rest.post=async(path,args)=>{if(path.endsWith('/messages'))messages.push(args.body);return post(path,args);};
+ const request=input(90);request.title='신고 제목';request.details='접수한 상세 내용';await s.create(request);await s.create(request);
+ assert.equal(messages.length,1);assert.equal(messages[0].embeds[0].description,request.details);assert(messages[0].embeds[0].title.includes(request.title));assert.deepEqual(messages[0].allowed_mentions.roles.sort(),['r2','r4']);assert.deepEqual(messages[0].allowed_mentions.parse,[]);for(const id of ['r2','r4'])assert.equal(messages[0].content.split('<@&'+id+'>').length-1,1);
+});
