@@ -78,22 +78,27 @@ export function splitRosterText(text,limit=1900){const pages=[];let current='';f
 export async function syncWebsiteRosters(client,boards,storage={read,write}){
  if(!Array.isArray(boards))return;
  const runtime=storage.read('runtime.json');runtime.rosterBoards||={};
+ const groups=new Map();for(const b of boards){if(!['general','premier','tiers'].includes(b.key))continue;const list=groups.get(b.channelId)||[];list.push(b);groups.set(b.channelId,list);}
+ boards=[...groups.values()].map(list=>list.length===1?list[0]:({...list[0],sections:list.flatMap(b=>[{title:{general:'운영진·역할',premier:'프리미어 팀',tiers:'팀 티어'}[b.key],lines:[]},...b.sections]),sourceVersion:Math.max(...list.map(b=>Number(b.sourceVersion)||0)),sourceAt:Math.max(...list.map(b=>Number(b.sourceAt)||0)),joinedKeys:list.map(b=>b.key)}));
  for(const board of boards){
   if(!['general','premier','tiers'].includes(board.key)||!/^\d{17,20}$/.test(board.channelId||'')||!Array.isArray(board.sections))continue;
   const title={general:'운영진·역할',premier:'프리미어 팀',tiers:'팀 티어'}[board.key],header='**홈페이지 연동 명단 · '+title+'**',lines=[header,'홈페이지에서 수정한 내용이 자동 반영됩니다.'];
   for(const section of board.sections)lines.push('\n**'+String(section.title||'').replace(/([\\*_~\x60>|])/g,'\\$1')+'**',...(section.lines?.length?section.lines:['미배치']));
   const content=lines.join('\n'),parts=content.length<=2000?[content]:splitRosterText(content),pages=parts.map((part,index)=>index===0?part:header+'\n**이어서 · '+(index+1)+'/'+parts.length+'**\n'+part);
-  const hash=JSON.stringify(['plain-linked-v2',pages]),previous=runtime.rosterBoards[board.key]||{},sourceVersion=Number(board.sourceVersion)||0,sourceAt=Number(board.sourceAt)||0;
+  const hash=JSON.stringify([board.joinedKeys?'continuous-channel-v1':'plain-linked-v2',pages]),previous=runtime.rosterBoards[board.key]||{},sourceVersion=Number(board.sourceVersion)||0,sourceAt=Number(board.sourceAt)||0;
   if((previous.sourceVersion||0)>sourceVersion||((previous.sourceVersion||0)===sourceVersion&&(previous.sourceAt||0)>sourceAt))continue;
   if(previous.hash===hash&&previous.channelId===board.channelId){if(previous.sourceVersion!==sourceVersion||previous.sourceAt!==sourceAt){runtime.rosterBoards[board.key]={...previous,sourceVersion,sourceAt};storage.write('runtime.json',runtime);}continue;}
   const channel=await client.channels.fetch(board.channelId);if((channel.guildId||channel.guild?.id)!=='1492461447568162876')throw Error('명단 대상은 ETG 팀 서버의 채널이어야 합니다.');
-  const ids=previous.channelId===board.channelId?previous.messageIds||[]:[],next=[],messages=[];
+  const ids=[...new Set((board.joinedKeys||[board.key]).flatMap(key=>runtime.rosterBoards[key]?.channelId===board.channelId?runtime.rosterBoards[key].messageIds||[]:[]))],next=[],messages=[];
   for(const id of ids){const message=await channel.messages.fetch(id).catch(error=>{if(error.code===10008||error.status===404)return null;throw error;});if(message?.author.id===client.user.id)messages.push(message);}
   if(!messages.length){
    const recent=await channel.messages.fetch({limit:100});
-   messages.push(...[...recent.values()].filter(m=>m.author.id===client.user.id&&m.content?.startsWith(header)).sort((a,b)=>a.id.length-b.id.length||a.id.localeCompare(b.id)));
+   messages.push(...[...recent.values()].filter(m=>m.author.id===client.user.id&&(board.joinedKeys?m.content?.startsWith('**홈페이지 연동 명단 · '):m.content?.startsWith(header))).sort((a,b)=>a.id.length-b.id.length||a.id.localeCompare(b.id)));
   }
   if(!messages.length)continue;
+  // One channel becomes one contiguous sequence; edit timestamps cannot regroup old messages.
+  const rebuilding=!!board.joinedKeys&&previous.sequenceVersion!==1,oldMessages=rebuilding?[...messages]:[];
+  if(rebuilding)messages.length=0;
   for(let index=0;index<pages.length;index++){
    const body={content:pages[index],allowedMentions:{parse:[],repliedUser:false},attachments:[],embeds:[]};
    let message=messages[index];
@@ -103,7 +108,8 @@ export async function syncWebsiteRosters(client,boards,storage={read,write}){
    runtime.rosterBoards[board.key]={channelId:board.channelId,messageIds:[...next,...messages.slice(index+1).map(m=>m.id)],hash:null,sourceVersion,sourceAt};
    storage.write('runtime.json',runtime);
   }
-  for(const message of messages.slice(pages.length))await message.delete();
-  runtime.rosterBoards[board.key]={channelId:board.channelId,messageIds:next,hash,sourceVersion,sourceAt};storage.write('runtime.json',runtime);
+  for(const message of [...messages.slice(pages.length),...oldMessages])await message.delete();
+  runtime.rosterBoards[board.key]={channelId:board.channelId,messageIds:next,hash,sourceVersion,sourceAt,...(board.joinedKeys?{sequenceVersion:1}: {})};for(const key of board.joinedKeys||[])if(key!==board.key)delete runtime.rosterBoards[key];storage.write('runtime.json',runtime);
  }
 }
+
