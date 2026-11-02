@@ -53,7 +53,7 @@ export function createSupportTickets(rest,botId){
   if(!SCOPES[scope])throw Error('관련 분야를 확인하세요.');
   const category=await rest.get('/channels/'+TICKET_CATEGORY);if(category.type!==4)throw Error('티켓 카테고리를 확인하세요.');
   const roles=await rest.get('/guilds/'+category.guild_id+'/roles'),allLeadNames=new Set([...communityLeads,...Object.values(scopeLeads).flatMap(set=>[...set])]);
-  return {scope,guild:category.guild_id,securityOverwrites:(category.permission_overwrites||[]).filter(e=>BigInt(e.allow||0)===0n&&BigInt(e.deny||0)!==0n),deletionStaff:roles.filter(r=>communityLeads.has(roleName(r))).map(r=>r.id),staff:roles.filter(r=>communityLeads.has(roleName(r))||scopeLeads[scope].has(roleName(r))).map(r=>r.id),managedStaff:roles.filter(r=>allLeadNames.has(roleName(r))||ADMIN_ROLES.has(roleName(r))||BASE_STAFF.has(roleName(r))).map(r=>r.id)};
+  return {scope,guild:category.guild_id,securityOverwrites:(category.permission_overwrites||[]).filter(e=>BigInt(e.allow||0)===0n&&BigInt(e.deny||0)!==0n),deletionStaff:roles.filter(r=>communityLeads.has(roleName(r))).map(r=>r.id),staff:roles.filter(r=>communityLeads.has(roleName(r))||scopeLeads[scope].has(roleName(r))||roleName(r)==='신고문의담당').map(r=>r.id),managedStaff:roles.filter(r=>allLeadNames.has(roleName(r))||ADMIN_ROLES.has(roleName(r))||BASE_STAFF.has(roleName(r))).map(r=>r.id)};
  }
 
  async function staff(userId,c){if(userId===OWNER)return true;const m=await rest.get('/guilds/'+c.guild+'/members/'+userId);return m.roles?.some(id=>c.staff.includes(id))||false;}
