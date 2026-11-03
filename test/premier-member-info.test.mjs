@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {syncPremierMemberInfo,memberInfoBody,activityText,MEMBER_SLOTS} from '../premier-member-info.mjs';
-const guild='1492461447568162876',role='111111111111111111',category='222222222222222222',channel='333333333333333333',user='444444444444444444',bot='555555555555555555',manager='666666666666666666';
+const guild='1492461447568162876',role='111111111111111111',category='222222222222222222',channel='1567090887283048498',user='444444444444444444',bot='555555555555555555',manager='666666666666666666';
 function fixture(){
  let seq=700000000000000000n;const messages=[],writes=[],members=new Map([[user,{roles:[role]}]]),overwrites=[{id:guild,type:0,deny:'1024',allow:'0'},{id:role,type:0,allow:'1024',deny:'0'},{id:manager,type:0,allow:'1024',deny:'0'}];
  const channels=[{id:category,type:4,name:'상급1',permission_overwrites:structuredClone(overwrites)},{id:channel,type:0,name:'팀원정보',parent_id:category,permission_overwrites:structuredClone(overwrites)}],roles=[{id:role,name:'상급1',permissions:'0'},{id:manager,name:'매니저',permissions:'0'}];
@@ -56,4 +56,19 @@ test('message discovery paginates past human chatter and preserves existing IDs'
  const f=fixture();await syncPremierMemberInfo(f.client,f.payload);
  for(let i=0;i<120;i++)f.messages.push({id:String(900000000000000000n+BigInt(i)),author:{id:user},content:'일반 메시지'});
  const ids=f.messages.slice(0,9).map(m=>m.id);assert.equal((await syncPremierMemberInfo(f.client,f.payload)).updated,0);assert.deepEqual(f.messages.slice(0,9).map(m=>m.id),ids);assert.equal(f.messages.length,129);
+});
+test('explicit upper1 channel ID survives decoration and stale manifests without publishing to same-name channels',async()=>{
+ const f=fixture();f.channels[0].name='🏆｜상급1';f.channels[1].name='📋｜선수-정보';
+ f.team.channels={categoryId:'888888888888888888',channelIds:['999999999999999999']};
+ f.channels.push({...structuredClone(f.channels[1]),id:'999999999999999999',name:'팀원정보'});
+ const r=await syncPremierMemberInfo(f.client,f.payload);assert.equal(r.updated,9);assert.equal(r.errors.length,0);assert(f.writes.every(w=>w[1].startsWith('/channels/'+channel+'/')));
+});
+test('missing explicit ID, wrong type and wrong team parent fail without fallback',async()=>{
+ for(const mutate of [f=>f.channels[1].id='999999999999999999',f=>f.channels[1].type=4,f=>f.channels[0].name='상급2']){
+  const f=fixture();mutate(f);assert.equal((await syncPremierMemberInfo(f.client,f.payload)).errors.length,1);assert.equal(f.writes.length,0);
+ }
+});
+test('unbound teams accept emoji and separator names while retaining privacy checks',async()=>{
+ const f=fixture();f.team.name='상급2';f.roles[0].name='상급2';f.channels[0].name='🏆｜상급2';f.channels[1].name='📋・팀원-정보';
+ assert.equal((await syncPremierMemberInfo(f.client,f.payload)).updated,9);
 });
