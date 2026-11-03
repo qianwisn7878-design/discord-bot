@@ -1,3 +1,4 @@
+import {executePremierChannels} from './premier-channels.mjs';
 import {STATIC_DISCORD_IDS} from './relay-policy.mjs';
 import {executeScrimVoice} from './scrim-voice-relay.mjs';
 const GUILDS=new Set(['1492461447568162876','1554439098490429442','1554439352652922891','1563217788288499813','1477820654739787858']);
@@ -7,7 +8,7 @@ const scrimRecordChannel=channel=>channel.guild_id==='1492461447568162876'&&chan
 const managedName=name=>/^(내전|스크림|[AB]팀)\s/.test(name||'')||/^밴픽-[a-f0-9]{8}$/.test(name||'');
 const forbiddenPermissions=8n|32n|268435456n|536870912n;
 export async function validateRelayJob(client,job){
- if(job.kind==='cleanup-voices'||job.kind==='scrim-voice')return;
+ if(job.kind==='premier-channels'||job.kind==='cleanup-voices'||job.kind==='scrim-voice')return;
  if(job.kind!=='rest'||!['GET','POST','PATCH','PUT','DELETE'].includes(job.method)||typeof job.path!=='string'||job.path.length>2000||/[\\#]|%2f|%5c|\.\./i.test(job.path))throw Error('허용되지 않은 봇 작업입니다.');
  if(job.files?.length>2||job.files?.some(f=>typeof f.base64!=='string'||f.base64.length>2900000||!['image/png','image/jpeg','image/webp'].includes(f.type)))throw Error('허용되지 않은 첨부 파일입니다.');
  const path=job.path.split('?')[0],parts=path.split('/').filter(Boolean),body=job.body||{};
@@ -57,7 +58,7 @@ async function cleanupVoices(client,job){
  for(const id of targets)await client.rest.delete('/channels/'+id);
  return {ok:true};
 }
-export async function executeRelayJob(client,job){try{const validated=await validateRelayJob(client,job);if(job.kind==='scrim-voice')return {status:200,body:await executeScrimVoice(client,job)};if(job.kind==='cleanup-voices')return {status:200,body:await cleanupVoices(client,job)};const files=(job.files||[]).map(f=>({data:Buffer.from(f.base64,'base64'),name:f.name,contentType:f.type})),options={...(job.body?{body:job.body}:{}),...(files.length?{files}:{})};let body=validated?.prefetched||await client.rest[job.method.toLowerCase()](job.path,options);if(job.path==='/users/@me/channels'&&body?.id)outboundDMs.add(body.id);if(job.path==='/oauth2/applications/@me')body={id:body.id,flags:body.flags,flags_new:body.flags_new};return {status:job.method==='DELETE'?204:200,body:body??null};}catch(error){return {status:Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:403,body:{message:String(error.rawError?.message||error.message||'봇 작업 실패').slice(0,250),code:typeof error.code==='number'?error.code:undefined}};}}
+export async function executeRelayJob(client,job){try{const validated=await validateRelayJob(client,job);if(job.kind==='premier-channels')return {status:200,body:await executePremierChannels(client,job)};if(job.kind==='scrim-voice')return {status:200,body:await executeScrimVoice(client,job)};if(job.kind==='cleanup-voices')return {status:200,body:await cleanupVoices(client,job)};const files=(job.files||[]).map(f=>({data:Buffer.from(f.base64,'base64'),name:f.name,contentType:f.type})),options={...(job.body?{body:job.body}:{}),...(files.length?{files}:{})};let body=validated?.prefetched||await client.rest[job.method.toLowerCase()](job.path,options);if(job.path==='/users/@me/channels'&&body?.id)outboundDMs.add(body.id);if(job.path==='/oauth2/applications/@me')body={id:body.id,flags:body.flags,flags_new:body.flags_new};return {status:job.method==='DELETE'?204:200,body:body??null};}catch(error){return {status:Number.isInteger(error.status)&&error.status>=400&&error.status<=599?error.status:403,body:{message:String(error.rawError?.message||error.message||'봇 작업 실패').slice(0,250),code:typeof error.code==='number'?error.code:undefined}};}}
 export function installDiscordRelay(client,bridge,{idleMs=1000,retryMs=5000}={}){
  let running=false,stopped=false,timer=null,timerAt=Infinity,wakeRequested=false;
  const inflight=new Map(),completed=new Map(),results=new Map();
@@ -74,4 +75,5 @@ export function installDiscordRelay(client,bridge,{idleMs=1000,retryMs=5000}={})
  schedule(0);console.log('[봇 중계] exchange-v1 준비');
  return {stop(){stopped=true;clearTimeout(timer);}};
 }
+
 
