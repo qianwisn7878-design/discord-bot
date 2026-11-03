@@ -27,7 +27,7 @@ async function run(client,job){
  }
  const managers=roles.filter(r=>!r.managed&&managerName(r.name));if(!managers.length)throw Error('팀 서버에서 매니저 역할을 찾을 수 없습니다.');
  const allow=String(1024n|2048n|65536n|1048576n|2097152n|3145728n|32768n|16384n|34359738368n|68719476736n|274877906944n);
- const overwrites=[{id:GUILD,type:0,allow:'0',deny:String(VIEW)},{id:job.roleId,type:0,allow,deny:'0'},...managers.map(r=>({id:r.id,type:0,allow,deny:'0'})),{id:client.user.id,type:1,allow:String(1024n|16n|268435456n),deny:'0'}];
+ const overwrites=[{id:GUILD,type:0,allow:'0',deny:String(VIEW)},{id:job.roleId,type:0,allow,deny:'0'},...managers.map(r=>({id:r.id,type:0,allow,deny:'0'})),{id:client.user.id,type:1,allow:String(1024n|16n|2048n|16384n|65536n|268435456n),deny:'0'}];
  const matches=channels.filter(c=>c.type===4&&c.name===job.teamName);if(matches.length>1)throw Error('같은 이름의 팀 카테고리가 여러 개입니다.');
  let category=matches[0];
  if(category&&!owned(category))throw Error('같은 이름의 기존 카테고리가 있습니다. 팀 역할 권한을 확인하세요.');
