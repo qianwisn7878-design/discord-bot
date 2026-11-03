@@ -32,15 +32,27 @@ function privateFor(channel,roleId){
  const overwrites=channel.permission_overwrites||[];
  return overwrites.some(o=>o.id===GUILD&&Number(o.type)===0&&(BigInt(o.deny||0)&1024n)!==0n&&!visible(o))&&overwrites.some(o=>o.id===roleId&&Number(o.type)===0&&visible(o));
 }
+const MEMBER_INFO_CHANNEL_IDS=Object.freeze({'상급1':'1567090887283048498'});
+const normalizedName=value=>String(value||'').normalize('NFKC').replace(/[^가-힣a-zA-Z0-9]/g,'');
 function targetChannel(team,channels,roles,botId){
- const categories=channels.filter(c=>c.type===4&&c.name===team.name&&privateFor(c,team.roleId));
- if(categories.length!==1)throw Error('비공개 팀 카테고리를 하나로 확인할 수 없습니다.');
- const category=categories[0];
- if(team.channels?.categoryId&&team.channels.categoryId!==category.id)throw Error('저장된 팀 카테고리가 일치하지 않습니다.');
- const matches=channels.filter(c=>c.parent_id===category.id&&c.type===0&&c.name.replace(/[\s-]/g,'')==='팀원정보');
- if(matches.length!==1)throw Error('팀원정보 채널을 하나로 확인할 수 없습니다.');
- const channel=matches[0];
- if(team.channels?.channelIds&&!team.channels.channelIds.includes(channel.id))throw Error('연결된 팀원정보 채널이 아닙니다.');
+ const boundId=MEMBER_INFO_CHANNEL_IDS[team.name]||team.channels?.memberInfoChannelId;
+ let category,channel;
+ if(boundId){
+  channel=channels.find(c=>c.id===boundId);
+  if(!channel)throw Error('지정된 팀원정보 채널 '+boundId+'을 팀 서버에서 찾지 못했습니다.');
+  if(channel.type!==0)throw Error('지정된 팀원정보 ID는 텍스트 채널이어야 합니다.');
+  category=channels.find(c=>c.id===channel.parent_id&&c.type===4);
+  if(!category||normalizedName(category.name)!==normalizedName(team.name)||!privateFor(category,team.roleId))throw Error('지정 채널의 상위 카테고리와 팀 비공개 권한을 확인하세요.');
+ }else{
+  const categories=channels.filter(c=>c.type===4&&normalizedName(c.name)===normalizedName(team.name)&&privateFor(c,team.roleId));
+  if(categories.length!==1)throw Error('비공개 팀 카테고리를 하나로 확인할 수 없습니다.');
+  category=categories[0];
+  if(team.channels?.categoryId&&team.channels.categoryId!==category.id)throw Error('저장된 팀 카테고리가 일치하지 않습니다.');
+  const matches=channels.filter(c=>c.parent_id===category.id&&c.type===0&&normalizedName(c.name)==='팀원정보');
+  if(matches.length!==1)throw Error('팀원정보 채널을 하나로 확인할 수 없습니다.');
+  channel=matches[0];
+  if(team.channels?.channelIds&&!team.channels.channelIds.includes(channel.id))throw Error('연결된 팀원정보 채널이 아닙니다.');
+ }
  if(!privateFor(channel,team.roleId))throw Error('팀원정보 채널을 비공개로 설정하세요.');
  const managers=new Set(roles.filter(r=>/^(매니저|팀 매니저|프리미어 매니저|프리미어 팀 매니저)$/.test(r.name?.trim()||'')).map(r=>r.id));
  for(const o of channel.permission_overwrites||[]){
