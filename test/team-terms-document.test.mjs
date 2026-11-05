@@ -58,3 +58,22 @@ test('replaces only the old policy attachment with the requested Korean filename
  assert.deepEqual(f.reactions,before);assert(f.message.attachments.has('old'));assert(!f.message.attachments.has('old-pdf'));
  await syncTeamTermsDocument(f.client,{load:pdf});assert.equal(f.edits.length,1);
 });
+
+
+test('retains one policy PDF, preserves unrelated files and all 30 reaction users, and stays stable across restarts',async()=>{
+ const f=fixture();f.message.content=TEAM_TERMS_CONTENT;
+ f.message.attachments.set('first',{id:'first',name:TEAM_POLICY_DISPLAY_NAME.replaceAll(' ','_')});
+ f.message.attachments.set('duplicate',{id:'duplicate',name:TEAM_POLICY_DISPLAY_NAME});
+ f.message.attachments.set('legacy',{id:'legacy',name:TEAM_POLICY_FILE});
+ f.reactions.set('✅',new Set(Array.from({length:30},(_,i)=>'user'+i)));const before=structuredClone(f.reactions);
+ await syncTeamTermsDocument(f.client,{load:()=>{throw Error('must not upload another PDF');}});
+ assert.equal(f.edits.length,1);assert.deepEqual(f.edits[0].attachments,[{id:'old'},{id:'first'}]);assert(!f.edits[0].files);
+ assert.deepEqual(f.reactions,before);assert.equal(f.message.id,TEAM_TERMS_MESSAGE_ID);
+ await syncTeamTermsDocument(f.client,{load:()=>{throw Error('must not upload');}});assert.equal(f.edits.length,1);
+});
+test('recognizes Discord sanitized attachment filenames without uploading another copy',async()=>{
+ const f=fixture();f.message.content=TEAM_TERMS_CONTENT;
+ f.message.attachments.set('pdf',{id:'pdf',name:TEAM_POLICY_DISPLAY_NAME.replaceAll(' ','_')});
+ const result=await syncTeamTermsDocument(f.client,{load:()=>{throw Error('must not upload');}});
+ assert.equal(result.updated,false);assert.equal(f.edits.length,0);
+});
