@@ -33,7 +33,7 @@ test('missing PDF, corrupt PDF or a missing/wrong message fails before any edit;
  const f=fixture();f.channel.messages.fetch=async()=>{throw Object.assign(Error('not found'),{status:404});};await assert.rejects(syncTeamTermsDocument(f.client,{load:pdf}));assert.equal(f.edits.length,0);
 });
 test('content-only correction keeps the existing PDF and reaction users',async()=>{
- const f=fixture();f.message.attachments.set('pdf',{id:'pdf',name:TEAM_POLICY_FILE,TEAM_POLICY_DISPLAY_NAME,loadTeamPolicy});await syncTeamTermsDocument(f.client,{load:()=>{throw Error('must not read');}});
+ const f=fixture();f.message.attachments.set('pdf',{id:'pdf',name:TEAM_POLICY_DISPLAY_NAME});await syncTeamTermsDocument(f.client,{load:()=>{throw Error('must not read');}});
  assert.equal(f.edits.length,1);assert(!Object.hasOwn(f.edits[0],'files'));assert(!Object.hasOwn(f.edits[0],'attachments'));assert.equal(f.reactions.get('✅').size,2);
 });
 
