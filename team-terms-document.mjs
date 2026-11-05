@@ -22,28 +22,40 @@ export function syncTeamTermsDocument(client,{load=loadTeamPolicy}={}){
  const task=update(client,load).finally(()=>inflight.delete(client));inflight.set(client,task);return task;
 }
 async function update(client,load){
- const channel=await client.channels.fetch(CHANNEL);
- if(!channel?.isTextBased()||channel.guildId!==GUILD)throw Error('기존 팀 이용약관 채널을 확인하세요. 메시지는 변경하지 않았습니다.');
- // Fetch only the exact existing message. Never create or delete a consent message.
- const message=await channel.messages.fetch(TEAM_TERMS_MESSAGE_ID);
- if(message.id!==TEAM_TERMS_MESSAGE_ID||message.channelId!==CHANNEL||message.author?.id!==client.user.id)throw Error('지정한 이용약관 메시지와 작성 봇을 확인하세요. 메시지는 변경하지 않았습니다.');
- const attachments=[...(message.attachments?.values()||[])];
- const isDesired=a=>normalizedFilename(a.name)===normalizedFilename(TEAM_POLICY_DISPLAY_NAME);
- const isPolicy=a=>isDesired(a)||normalizedFilename(a.name)===normalizedFilename(TEAM_POLICY_FILE);
+ const channel=await client.rest.get('/channels/'+CHANNEL);
+ if(channel?.type!==0||channel.guild_id!==GUILD)throw Error('기존 동의 채널을 확인하세요. 메시지는 변경하지 않았습니다.');
+ const endpoint='/channels/'+CHANNEL+'/messages/'+TEAM_TERMS_MESSAGE_ID;
+ // Fetch fresh wire-format attachments. Never read or edit a cached SDK Message.
+ const message=await client.rest.get(endpoint);
+ if(message.id!==TEAM_TERMS_MESSAGE_ID||message.channel_id!==CHANNEL||message.author?.id!==client.user.id)throw Error('지정한 동의 메시지와 작성 봇을 확인하세요. 메시지는 변경하지 않았습니다.');
+ if(!Array.isArray(message.attachments))throw Error('첨부파일 목록을 확인하지 못해 수정을 중단했습니다.');
+ const attachments=message.attachments;
+ const filename=a=>a.filename??a.name;
+ const isDesired=a=>normalizedFilename(filename(a))===normalizedFilename(TEAM_POLICY_DISPLAY_NAME);
+ const isPolicy=a=>isDesired(a)||normalizedFilename(filename(a))===normalizedFilename(TEAM_POLICY_FILE);
  const keep=attachments.find(isDesired);
  const retained=attachments.filter(a=>!isPolicy(a)||a.id===keep?.id);
+ if(retained.some(a=>typeof a.id!=='string'))throw Error('보존할 첨부파일 ID를 확인하지 못했습니다.');
  const attached=Boolean(keep),changedAttachments=retained.length!==attachments.length;
  if(attached&&!changedAttachments&&message.content===TEAM_TERMS_CONTENT)return {updated:false,messageId:message.id};
+ // Unknown existing PDFs must not trigger another upload on every restart.
+ if(!attached&&attachments.some(a=>!isPolicy(a)&&(a.content_type==='application/pdf'||/\.pdf$/i.test(filename(a)||''))))throw Error('기존 PDF 이름을 인식하지 못해 추가 첨부를 중단했습니다: '+attachments.map(a=>filename(a)||'(이름 없음)').join(', ').slice(0,160));
  let bytes;
  if(!attached){
-  try{bytes=await load();}catch(e){if(e.code==='ENOENT')throw Error('운영정책 PDF 파일이 없습니다. GitHub 최신 코드와 assets 파일을 함께 받고 재시작하세요. 기존 메시지와 반응은 유지했습니다.');throw e;}
-  if(!Buffer.isBuffer(bytes)||bytes.subarray(0,5).toString()!=='%PDF-'||createHash('sha256').update(bytes).digest('hex')!==HASH)throw Error('첨부할 운영정책 PDF가 원본과 다릅니다. 기존 메시지와 반응은 유지했습니다.');
+  try{bytes=await load();}catch(e){if(e.code==='ENOENT')throw Error('PDF 파일이 없습니다. GitHub 최신 코드와 assets 파일을 함께 받고 재시작하세요. 기존 메시지와 반응은 유지했습니다.');throw e;}
+  if(!Buffer.isBuffer(bytes)||bytes.subarray(0,5).toString()!=='%PDF-'||createHash('sha256').update(bytes).digest('hex')!==HASH)throw Error('첨부할 PDF가 원본과 다릅니다. 기존 메시지와 반응은 유지했습니다.');
  }
- const body={content:TEAM_TERMS_CONTENT,allowedMentions:{parse:[]}};
- if(bytes||changedAttachments)body.attachments=retained.map(a=>({id:a.id}));
- if(bytes)body.files=[{attachment:bytes,name:TEAM_POLICY_DISPLAY_NAME}];
- await message.edit(body);
+ const body={content:TEAM_TERMS_CONTENT,allowed_mentions:{parse:[]}},options={body};
+ if(bytes||changedAttachments){
+  body.attachments=retained.map(a=>({id:a.id}));
+  if(bytes){
+   body.attachments.push({id:0,filename:TEAM_POLICY_DISPLAY_NAME});
+   options.files=[{data:bytes,name:TEAM_POLICY_DISPLAY_NAME,contentType:'application/pdf'}];
+  }
+ }
+ await client.rest.patch(endpoint,options);
+ const actual=await client.rest.get(endpoint);
+ const pdfs=actual.attachments?.filter(isPolicy)||[];
+ if(actual.id!==TEAM_TERMS_MESSAGE_ID||pdfs.length!==1||!isDesired(pdfs[0]))throw Error('수정 후 PDF 1개 여부를 확인하지 못했습니다. 재첨부하지 않고 중단합니다.');
  return {updated:true,messageId:message.id,pdfAttached:true};
 }
-
-
