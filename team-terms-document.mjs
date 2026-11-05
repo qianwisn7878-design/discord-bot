@@ -5,8 +5,14 @@ export const TEAM_TERMS_MESSAGE_ID='1563934946454667306';
 export const TEAM_TERMS_CONTENT='[ 필수 ] 이용약관 동의\n\n아래 이용약관에 동의하신다면 해당 메세지에 체크 반응을 눌러주세요.';
 const HASH='5b0ec0f9f5c850ee4ab81816322ba47dd084e929d0acd10e006a9837cd7e7df3';
 export const TEAM_POLICY_FILE='ETG-VALORANT-Team-Policy-2026-10-31-5b0ec0f9f5.pdf';
+export async function loadTeamPolicy(read=readFile){
+ try{return await read(new URL('./assets/'+TEAM_POLICY_FILE,import.meta.url));}
+ catch(e){if(e.code!=='ENOENT')throw e;}
+ const encoded=await read(new URL('./assets/'+TEAM_POLICY_FILE+'.base64',import.meta.url),'utf8');
+ return Buffer.from(encoded.replace(/\s/g,''),'base64');
+}
 const inflight=new WeakMap();
-export function syncTeamTermsDocument(client,{load=()=>readFile(new URL('./assets/'+TEAM_POLICY_FILE,import.meta.url))}={}){
+export function syncTeamTermsDocument(client,{load=loadTeamPolicy}={}){
  if(inflight.has(client))return inflight.get(client);
  const task=update(client,load).finally(()=>inflight.delete(client));inflight.set(client,task);return task;
 }
@@ -21,7 +27,7 @@ async function update(client,load){
  if(attached&&message.content===TEAM_TERMS_CONTENT)return {updated:false,messageId:message.id};
  let bytes;
  if(!attached){
-  try{bytes=await load();}catch(e){if(e.code==='ENOENT')throw Error('운영정책 PDF 파일이 없습니다. 봇 업데이트 ZIP의 assets 폴더를 함께 올리고 재시작하세요. 기존 메시지와 반응은 유지했습니다.');throw e;}
+  try{bytes=await load();}catch(e){if(e.code==='ENOENT')throw Error('운영정책 PDF 파일이 없습니다. GitHub 최신 코드와 assets 파일을 함께 받고 재시작하세요. 기존 메시지와 반응은 유지했습니다.');throw e;}
   if(!Buffer.isBuffer(bytes)||bytes.subarray(0,5).toString()!=='%PDF-'||createHash('sha256').update(bytes).digest('hex')!==HASH)throw Error('첨부할 운영정책 PDF가 원본과 다릅니다. 기존 메시지와 반응은 유지했습니다.');
  }
  const body={content:TEAM_TERMS_CONTENT,allowedMentions:{parse:[]}};
