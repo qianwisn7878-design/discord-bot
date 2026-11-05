@@ -62,3 +62,33 @@ test('replaces only the obsolete asset with the requested name and retains unrel
 test('PDF loaded from GitHub encoded asset is the unchanged supplied document',async()=>{
  const bytes=await loadTeamPrivacyPolicy();assert.equal(bytes.length,111492);assert.equal(bytes.subarray(0,5).toString(),'%PDF-');
 });
+
+test('matches the exact opaque filenames from the live log by document bytes, with and without a visible title',async()=>{
+ const bytes=await loadTeamPrivacyPolicy();
+ for(const withTitle of [false,true]){
+  const files=["d269505e87ce3476.pdf"].map((filename,i)=>({id:String(i+1),filename,size:bytes.length,content_type:'application/pdf',url:'https://cdn.discordapp.com/attachments/'+CHANNEL+'/'+(i+1)+'/'+filename,...(withTitle?{title:TEAM_PRIVACY_DISPLAY_NAME}:{})}));
+  const f=fixture(files);const before=new Set(f.reactions);let downloads=0;
+  const fetchImpl=async(url,options)=>{assert(url.startsWith('https://cdn.discordapp.com/attachments/'+CHANNEL+'/'));assert.equal(options.redirect,'error');downloads++;return new Response(bytes);};
+  await syncTeamPrivacyDocument(f.client,{fetchImpl,load:()=>{throw Error('must not attach another PDF');}});
+  assert.equal(f.message.attachments.length,1);assert.equal(f.message.attachments[0].id,'1');assert.deepEqual(f.reactions,before);assert(downloads>0);
+  assert(patches(f).every(c=>!c[2].files));
+  const previous=patches(f).length;
+  await syncTeamPrivacyDocument(f.client,{fetchImpl,load:()=>{throw Error('must not attach');}});
+  assert.equal(patches(f).length,previous);assert.equal(f.message.attachments.length,1);
+ }
+});
+test('only matching PDF contents are deduplicated; unrelated PDFs remain attached',async()=>{
+ const bytes=await loadTeamPrivacyPolicy(),files=[1,2,3].map(i=>({id:String(i),filename:'opaque-'+i+'.pdf',content_type:'application/pdf',url:'https://cdn.discordapp.com/attachments/'+CHANNEL+'/'+i+'/opaque-'+i+'.pdf'}));
+ const f=fixture(files);
+ const fetchImpl=async url=>new Response(url.includes('/3/')?Buffer.from('%PDF-unrelated'):bytes);
+ await syncTeamPrivacyDocument(f.client,{fetchImpl});assert.deepEqual(f.message.attachments.map(a=>a.id),['1','3']);assert(!patches(f)[0][2].files);
+});
+test('untrusted URLs or failed downloads abort before any change or upload',async()=>{
+ for(const url of ['https://example.test/file.pdf','https://cdn.discordapp.com/attachments/wrong/1/file.pdf']){
+  const f=fixture([{id:'1',filename:'opaque.pdf',url}]);let fetched=false;
+  await assert.rejects(syncTeamPrivacyDocument(f.client,{fetchImpl:async()=>{fetched=true;throw Error('unexpected');}}));
+  assert.equal(fetched,false);assert.equal(patches(f).length,0);
+ }
+ const f=fixture([{id:'1',filename:'opaque.pdf',url:'https://cdn.discordapp.com/attachments/'+CHANNEL+'/1/file.pdf'}]);
+ await assert.rejects(syncTeamPrivacyDocument(f.client,{fetchImpl:async()=>new Response('expired',{status:403})}));assert.equal(patches(f).length,0);
+});
