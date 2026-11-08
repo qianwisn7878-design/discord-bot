@@ -1,3 +1,4 @@
+const {fromRoles,resolveSheetDemographics,createSheetSyncRunner}=require('./sheet-demographics.cjs');
 const fs = require('fs');
 const path = require('path');
 const {
@@ -231,47 +232,8 @@ function loadUserInfo() {
         };
     }
 }
-function getAgeFromRoles(
-    member
-) {
-    for (
-        const [
-            age,
-            roleId
-        ]
-        of Object.entries(
-            AGE_ROLES
-        )
-    ) {
-        if (
-            member.roles.cache.has(
-                roleId
-            )
-        ) {
-            return age;
-        }
-    }
-    return '';
-}
-function getGenderFromRoles(
-    member
-) {
-    if (
-        member.roles.cache.has(
-            MALE_ROLE_ID
-        )
-    ) {
-        return '남자';
-    }
-    if (
-        member.roles.cache.has(
-            FEMALE_ROLE_ID
-        )
-    ) {
-        return '여자';
-    }
-    return '';
-}
+function getAgeFromRoles(member){return fromRoles(member,{ageRoles:AGE_ROLES,maleRoleId:MALE_ROLE_ID,femaleRoleId:FEMALE_ROLE_ID}).age;}
+function getGenderFromRoles(member){return fromRoles(member,{ageRoles:AGE_ROLES,maleRoleId:MALE_ROLE_ID,femaleRoleId:FEMALE_ROLE_ID}).gender;}
 function getValorantTierFromRoles(
     member
 ) {
@@ -488,7 +450,7 @@ async function getGuildMembers(
             );
     return members;
 }
-async function syncGoogleSheet(
+async function performGoogleSheetSync(
     client
 ) {
     console.log(
@@ -541,14 +503,7 @@ async function syncGoogleSheet(
             getActivityTimeText(
                 userData.activityTime
             );
-        const age =
-            getAgeFromRoles(
-                member
-            );
-        const gender =
-            getGenderFromRoles(
-                member
-            );
+        const {age,gender}=await resolveSheetDemographics(client,member,{ageRoles:AGE_ROLES,maleRoleId:MALE_ROLE_ID,femaleRoleId:FEMALE_ROLE_ID});
         const highestTier =
             getValorantTierFromRoles(
                 member
@@ -576,69 +531,40 @@ async function syncGoogleSheet(
             ]
         );
     }
-    await sheets
-        .spreadsheets
-        .values
-        .clear({
-            spreadsheetId:
-                SPREADSHEET_ID,
-            range:
-                `${SHEET_NAME}!A:J`
-        });
-    await sheets
-        .spreadsheets
-        .values
-        .update({
-            spreadsheetId:
-                SPREADSHEET_ID,
-            range:
-                `${SHEET_NAME}!A1`,
-            valueInputOption:
-                'USER_ENTERED',
-            requestBody: {
-                values:
-                    values
-            }
-        });
-    client.__legacyStatus.sheetSyncAt=new Date().toISOString();
+    // One serialized write replaces rows and clears only obsolete trailing rows.
+    // Never clear the live sheet before data retrieval or a successful write.
+    const previous=await sheets.spreadsheets.values.get({spreadsheetId:SPREADSHEET_ID,range:`${SHEET_NAME}!A:J`});
+    const height=Math.max(values.length,previous.data?.values?.length||0);
+    const padded=[...values,...Array.from({length:height-values.length},()=>Array(10).fill(''))];
+    await sheets.spreadsheets.values.update({
+        spreadsheetId:SPREADSHEET_ID,range:`${SHEET_NAME}!A1:J${height}`,
+        valueInputOption:'RAW',requestBody:{values:padded}
+    });
+    if(client.__legacyStatus)client.__legacyStatus.sheetSyncAt=new Date().toISOString();
     console.log(
         `[구글 시트] 동기화 완료 - ${members.size}명`
     );
     return true;
 }
-async function startGoogleSheetSync(
-    client
-) {
-    try {
-        await syncGoogleSheet(
-            client
-        );
-    } catch (error) {
-        console.error(
-            '[구글 시트] 초기 동기화 실패:',
-            error
-        );
-    }
-    setInterval(
-        async () => {
-            try {
-                await syncGoogleSheet(
-                    client
-                );
-            } catch (error) {
-                console.error(
-                    '[구글 시트] 주기적 동기화 실패:',
-                    error
-                );
-            }
-        },
-        SYNC_INTERVAL
-    );
-    console.log(
-        '[구글 시트] 5분 주기 자동 동기화가 시작되었습니다.'
-    );
+const syncTasks=new WeakMap();
+function syncGoogleSheet(client){
+    if(syncTasks.has(client))return syncTasks.get(client);
+    const task=performGoogleSheetSync(client).finally(()=>syncTasks.delete(client));
+    syncTasks.set(client,task);return task;
 }
-module.exports = {
-    startGoogleSheetSync,
-    syncGoogleSheet
-};
+async function startGoogleSheetSync(client){
+    if(client.__googleSheetSyncRunner)return client.__googleSheetSyncRunner;
+    const onError=error=>{
+        const message=String(error.message||'연결 오류').slice(0,200);
+        console.error('[구글 시트] 동기화 실패 · 자동 재시도 예정:',message);
+        if(client.__legacyStatus){client.__legacyStatus.errors.push('Google 시트 동기화 실패 · 재시도 대기');client.__legacyStatus.errors=client.__legacyStatus.errors.slice(-10);}
+    };
+    const runner=createSheetSyncRunner({run:()=>syncGoogleSheet(client),onError});
+    client.__googleSheetSyncRunner=runner;
+    client.on('etg:demographics-synced',()=>runner.request());
+    const timer=setInterval(()=>runner.request(0),SYNC_INTERVAL);timer.unref?.();
+    runner.request(0);
+    console.log('[구글 시트] 가입 정보 변경 후 자동 반영 · 5분 정기 확인 · 실패 시 재시도');
+    return runner;
+}
+module.exports={startGoogleSheetSync,syncGoogleSheet};
