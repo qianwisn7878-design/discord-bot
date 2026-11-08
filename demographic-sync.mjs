@@ -20,6 +20,12 @@ export async function refreshCommunityEligibility(client,bridge,userId){
 }
 export function installDemographicSync(client,bridge){
  const catalogs=new Map(),catalogJobs=new Map(),jobs=new Map(),pending=new Set();
+ const profiles=new Map();
+ client.__getCommunityDemographicProfile=userId=>{
+  const value=profiles.get(userId);
+  return value?{...value,profile:value.profile?{...value.profile}:null}:undefined;
+ };
+
  const error=e=>console.error('[가입 정보 역할 연동]',e.code?'Discord 오류 '+e.code:e.status?'홈페이지 오류 '+e.status:e.message);
  async function catalog(guild){if(catalogs.has(guild.id))return catalogs.get(guild.id);if(catalogJobs.has(guild.id))return catalogJobs.get(guild.id);const p=ensureDemographicRoles(guild).then(result=>{catalogs.set(guild.id,result);return result;}).finally(()=>catalogJobs.delete(guild.id));catalogJobs.set(guild.id,p);return p;}
  async function apply(member,profile){
@@ -32,6 +38,10 @@ export function installDemographicSync(client,bridge){
   await refreshCommunityEligibility(client,bridge,userId);
   const response=await bridge('/api/discord-bot/community-registration',{action:'demographics',guildId:COMMUNITY,userId,at:Date.now()});
   if(!Object.hasOwn(response,'profile')||(response.profile!==null&&(!BIRTH_YEARS.includes(response.profile?.birthYear)||!['male','female'].includes(response.profile?.gender))))throw Error('가입 정보 응답을 확인하지 못했습니다. 기존 역할을 유지합니다.');
+  const previous=profiles.get(userId);
+  const current={profile:response.profile?{birthYear:response.profile.birthYear,gender:response.profile.gender}:null,clear:response.clear===true,fetchedAt:Date.now()};
+  profiles.set(userId,current);
+  if(!previous||JSON.stringify([previous.profile,previous.clear])!==JSON.stringify([current.profile,current.clear]))client.emit?.('etg:demographics-synced',{userId});
   const errors=[];for(const id of DEMOGRAPHIC_GUILDS){const guild=client.guilds.cache.get(id);if(!guild)continue;try{const member=await guild.members.fetch({user:userId,force:true});if(!member.user.bot)await apply(member,response.profile);}catch(e){if(e.code!==10007)errors.push(e);}}if(errors.length)throw errors[0];
   pending.delete(userId);
  }
@@ -39,7 +49,7 @@ export function installDemographicSync(client,bridge){
  client.__syncCommunityDemographics=schedule;
  client.on('roleDelete',role=>{if(DEMOGRAPHIC_GUILDS.includes(role.guild.id))catalogs.delete(role.guild.id);});
  client.on('guildMemberAdd',member=>{if(DEMOGRAPHIC_GUILDS.includes(member.guild.id)&&!member.user.bot)schedule(member.id).catch(()=>{});});
- client.on('guildMemberRemove',member=>{if(member.guild.id===COMMUNITY)pending.add(member.id);});
+ client.on('guildMemberRemove',member=>{if(member.guild.id===COMMUNITY){profiles.delete(member.id);pending.add(member.id);}});
 
  let periodicRunning=false;
  async function sweep(){if(periodicRunning||!client.isReady())return;periodicRunning=true;let synced=0,failed=0;const users=new Set();try{for(const id of DEMOGRAPHIC_GUILDS){const guild=client.guilds.cache.get(id);if(!guild)continue;try{let after='0';for(let page=0;page<100;page++){const batch=await client.rest.get('/guilds/'+id+'/members?limit=1000&after='+after);for(const m of batch)if(!m.user.bot)users.add(m.user.id);if(batch.length<1000)break;after=batch.at(-1).user.id;}}catch(e){failed++;error(e);}}for(const id of users){try{await schedule(id);synced++;}catch{failed++;}}console.log('[가입 정보 역할 연동] 홈페이지 기준 확인 '+users.size+'명 / 완료 '+synced+'명 / 오류 '+failed+'건');}finally{periodicRunning=false;}}
@@ -47,4 +57,5 @@ export function installDemographicSync(client,bridge){
  const timer=setInterval(()=>{for(const id of pending)schedule(id).catch(()=>{});for(const id of DEMOGRAPHIC_GUILDS){const guild=client.guilds.cache.get(id);if(guild&&!catalogs.has(id))catalog(guild).catch(error);}},60000);timer.unref?.();
  return {stop(){clearInterval(timer);clearInterval(periodic);},sync:schedule};
 }
+
 
