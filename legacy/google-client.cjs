@@ -17,15 +17,17 @@ class GoogleAuth{
 }
 function sheets({auth}){
  const validate=id=>{if(id!==SHEET)throw Error('승인된 기존 정보 시트만 동기화할 수 있습니다.');};
- const request=async(url,method,body)=>{const token=await auth.token();const result=await fetch(url,{method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});if(!result.ok)throw Error('구글 시트 동기화 실패 · HTTP '+result.status);return {};};
+ const request=async(url,method,body)=>{const token=await auth.token();const result=await fetch(url,{method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(20000)});if(!result.ok)throw Error('구글 시트 동기화 실패 · HTTP '+result.status);return method==='GET'?{data:await result.json()}:{};};
  return {spreadsheets:{values:{
+  get:async({spreadsheetId,range})=>{validate(spreadsheetId);if(range!=='정보!A:J')throw Error('승인된 정보 탭만 조회할 수 있습니다.');return request('https://sheets.googleapis.com/v4/spreadsheets/'+SHEET+'/values/'+encodeURIComponent(range),'GET');},
   clear:async({spreadsheetId,range})=>{validate(spreadsheetId);if(range!=='정보!A:J')throw Error('승인된 정보 탭만 동기화할 수 있습니다.');return {};},
   update:async({spreadsheetId,range,requestBody})=>{
-   validate(spreadsheetId);if(range!=='정보!A1')throw Error('승인된 정보 탭만 동기화할 수 있습니다.');
+   validate(spreadsheetId);if(range!=='정보!A1'&&!/^정보!A1:J[1-9]\d*$/.test(range))throw Error('승인된 정보 탭만 동기화할 수 있습니다.');
    const values=requestBody.values;if(!Array.isArray(values)||values.some(row=>!Array.isArray(row)||row.length!==10))throw Error('동기화 데이터 형식을 확인하세요.');
+   if(range!=='정보!A1'&&Number(range.split(':J')[1])!==values.length)throw Error('저장 범위와 데이터 행 수가 일치하지 않습니다.');
    const base='https://sheets.googleapis.com/v4/spreadsheets/'+SHEET+'/values/';
    await request(base+encodeURIComponent(range)+'?valueInputOption=RAW','PUT',{range,majorDimension:'ROWS',values});
-   await request(base+encodeURIComponent('정보!A'+(values.length+1)+':J')+':clear','POST',{});return {};
+   if(range==='정보!A1')await request(base+encodeURIComponent('정보!A'+(values.length+1)+':J')+':clear','POST',{});return {};
   }
  }}};
 }
