@@ -35,7 +35,7 @@ function privateFor(channel,roleId){
 const MEMBER_INFO_CHANNEL_IDS=Object.freeze({'상급1':'1567090887283048498'});
 const normalizedName=value=>String(value||'').normalize('NFKC').replace(/[^가-힣a-zA-Z0-9]/g,'');
 function targetChannel(team,channels,roles,botId){
- const boundId=MEMBER_INFO_CHANNEL_IDS[team.name]||team.channels?.memberInfoChannelId;
+ const boundId=team.channels?.memberInfoChannelId||MEMBER_INFO_CHANNEL_IDS[team.name];
  let category,channel;
  if(boundId){
   channel=channels.find(c=>c.id===boundId);
