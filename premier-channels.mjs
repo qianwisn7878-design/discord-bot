@@ -1,12 +1,13 @@
+import {renamePremierTeam} from './premier-team-rename.mjs';
 const GUILD='1492461447568162876',VIEW=1024n;
 const teamName=/^(초청|최상급|상급|중상급|중급|초급)\s*[1-9]\d{0,3}$/;
 const managerName=name=>/^(매니저|팀 매니저|프리미어 매니저|프리미어 팀 매니저)$/.test(name.trim());
 export const teamChannels=name=>[{name:'📅｜일정',type:0},{name:'조합택틱',type:15},{name:'팀원정보',type:0},{name:'피드백',type:0},{name,type:0},{name:name+' 통방',type:2}];
 const locks=new Map();
 export async function executePremierChannels(client,job){
- if(job.guildId!==GUILD||!/^\d{17,20}$/.test(job.roleId||'')||!teamName.test(job.teamName||'')||!['ensure','delete'].includes(job.action))throw Error('하위 팀 채널 요청을 확인하세요.');
- const previous=locks.get(job.roleId)||Promise.resolve();let release;const pending=new Promise(r=>release=r);locks.set(job.roleId,pending);await previous;
- try{return await run(client,job);}finally{release();if(locks.get(job.roleId)===pending)locks.delete(job.roleId);}
+ if(job.guildId!==GUILD||!/^\d{17,20}$/.test(job.roleId||'')||!teamName.test(job.teamName||'')||!['ensure','delete','rename'].includes(job.action))throw Error('하위 팀 채널 요청을 확인하세요.');
+ const previous=locks.get(GUILD)||Promise.resolve();let release;const pending=new Promise(r=>release=r);locks.set(GUILD,pending);await previous;
+ try{return await (job.action==='rename'?renamePremierTeam(client,job):run(client,job));}finally{release();if(locks.get(GUILD)===pending)locks.delete(GUILD);}
 }
 async function run(client,job){
  const roles=await client.rest.get('/guilds/'+GUILD+'/roles'),role=roles.find(r=>r.id===job.roleId);
