@@ -33,14 +33,15 @@ async function resolveSheetDemographics(client,member,legacy={}){
  const response=await client.__legacyBridge('/api/discord-bot/community-registration',{action:'demographics',guildId:COMMUNITY,userId:member.id,at:Date.now()});
  return profileValues(response,member,legacy);
 }
-function createSheetSyncRunner({run,onError=()=>{},delayMs=2000,retryMs=5000,setTimer=setTimeout,clearTimer=clearTimeout}){
- let timer=null,running=false,requested=false,stopped=false,failures=0;
- const arm=ms=>{timer=setTimer(tick,ms);timer?.unref?.();};
+function createSheetSyncRunner({run,onError=()=>{},delayMs=2000,retryMs=5000,minIntervalMs=0,now=Date.now,setTimer=setTimeout,clearTimer=clearTimeout}){
+ let timer=null,running=false,requested=false,stopped=false,failures=0,lastStarted=-Infinity;
+ const arm=ms=>{timer=setTimer(tick,Math.max(ms,minIntervalMs-(now()-lastStarted)));timer?.unref?.();};
  async function tick(){
-  timer=null;if(stopped||running)return;running=true;requested=false;let failed=false;
+  timer=null;if(stopped||running)return;running=true;requested=false;lastStarted=now();let failed=false;
   try{await run();failures=0;}catch(e){failed=true;failures++;requested=true;onError(e);}
   finally{running=false;if(requested&&!stopped)arm(failed?Math.min(60000,retryMs*2**Math.min(failures-1,4)):delayMs);}
  }
  return {request(ms=delayMs){if(stopped)return;requested=true;if(!running&&timer===null)arm(ms);},stop(){stopped=true;requested=false;if(timer!==null)clearTimer(timer);timer=null;}};
 }
 module.exports={fromRoles,profileValues,resolveSheetDemographics,createSheetSyncRunner};
+
