@@ -433,22 +433,23 @@ async function getGuildMembers(
         await client.guilds.fetch(
             GUILD_ID
         );
-    await guild.members.fetch();
-    const members =
-        guild.members.cache
-            .filter(
-                member =>
-                    !member.user.bot
-            )
-            .sort(
-                (
-                    a,
-                    b
-                ) =>
-                    a.joinedTimestamp -
-                    b.joinedTimestamp
-            );
-    return members;
+    // REST pagination avoids Gateway opcode 8 and never treats a partial cache as the full roster.
+    const all=new Map();let after='0',complete=false;
+    for(let page=0;page<100;page++){
+        const batch=await guild.members.list({limit:1000,after});
+        if(!batch||!Number.isInteger(batch.size)||typeof batch.values!=='function')throw Error('Discord 전체 명단 응답을 확인하지 못했습니다. 기존 시트를 유지합니다.');
+        let next=after;
+        for(const member of batch.values()){
+            if(!/^\d{17,20}$/.test(member.id||'')||!member.user||!member.roles?.cache)throw Error('Discord 회원 응답이 올바르지 않습니다. 기존 시트를 유지합니다.');
+            if(BigInt(member.id)>BigInt(next))next=member.id;
+            all.set(member.id,member);
+        }
+        if(batch.size<1000){complete=true;break;}
+        if(next===after)throw Error('Discord 명단 페이지가 반복되었습니다. 기존 시트를 유지합니다.');
+        after=next;
+    }
+    if(!complete)throw Error('Discord 전체 명단 확인이 끝나지 않았습니다. 기존 시트를 유지합니다.');
+    return new Map([...all.values()].filter(member=>!member.user.bot).sort((a,b)=>(a.joinedTimestamp||0)-(b.joinedTimestamp||0)).map(member=>[member.id,member]));
 }
 async function performGoogleSheetSync(
     client
@@ -559,7 +560,7 @@ async function startGoogleSheetSync(client){
         console.error('[구글 시트] 동기화 실패 · 자동 재시도 예정:',message);
         if(client.__legacyStatus){client.__legacyStatus.errors.push('Google 시트 동기화 실패 · 재시도 대기');client.__legacyStatus.errors=client.__legacyStatus.errors.slice(-10);}
     };
-    const runner=createSheetSyncRunner({run:()=>syncGoogleSheet(client),onError});
+    const runner=createSheetSyncRunner({run:()=>syncGoogleSheet(client),onError,minIntervalMs:30000});
     client.__googleSheetSyncRunner=runner;
     client.on('etg:demographics-synced',()=>runner.request());
     const timer=setInterval(()=>runner.request(0),SYNC_INTERVAL);timer.unref?.();
@@ -568,3 +569,4 @@ async function startGoogleSheetSync(client){
     return runner;
 }
 module.exports={startGoogleSheetSync,syncGoogleSheet};
+
