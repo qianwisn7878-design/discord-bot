@@ -3,8 +3,9 @@ import {createHash} from 'node:crypto';
 const GUILD='1492461447568162876',CHANNEL='1551594410754580481';
 export const TEAM_TERMS_MESSAGE_ID='1563934946454667306';
 export const TEAM_TERMS_CONTENT='[ 필수 ] 이용약관 동의\n\n아래 이용약관에 동의하신다면 해당 메세지에 체크 반응을 눌러주세요.';
-const HASH='5b0ec0f9f5c850ee4ab81816322ba47dd084e929d0acd10e006a9837cd7e7df3';
-export const TEAM_POLICY_FILE='ETG-VALORANT-Team-Policy-2026-10-31-5b0ec0f9f5.pdf';
+const HASH='fb9cc873436a0b4c297887c272e0c3269a142b50ceac62bc88c0ec8fb0757119';
+const LEGACY_HASH='5b0ec0f9f5c850ee4ab81816322ba47dd084e929d0acd10e006a9837cd7e7df3';
+export const TEAM_POLICY_FILE='ETG-VALORANT-Team-Terms-2026-11-16-fb9cc87343.pdf';
 export const TEAM_POLICY_DISPLAY_NAME='발로란트 팀 이용약관.pdf';
 export async function loadTeamPolicy(read=readFile){
  try{return await read(new URL('./assets/'+TEAM_POLICY_FILE,import.meta.url));}
@@ -19,11 +20,8 @@ function normalizedFilename(value){
 async function policyAttachmentIds(attachments,fetchImpl){
  const policyIds=new Set(),keepableIds=new Set();
  const match=value=>normalizedFilename(value)===normalizedFilename(TEAM_POLICY_DISPLAY_NAME);
- const old=value=>normalizedFilename(value)===normalizedFilename(TEAM_POLICY_FILE);
  for(const a of attachments){
   const filename=a.filename??a.name??'';
-  if(match(filename)){policyIds.add(a.id);keepableIds.add(a.id);continue;}
-  if(old(filename)){policyIds.add(a.id);if(match(a.title))keepableIds.add(a.id);continue;}
   if(a.content_type!=='application/pdf'&&!/\.pdf$/i.test(filename)&&!match(a.title))continue;
   // Discord may replace the storage filename with a hash and keep the visible name in title.
   // Match the actual supplied document before retaining/removing any opaque-name attachment.
@@ -36,7 +34,9 @@ async function policyAttachmentIds(attachments,fetchImpl){
   if(!response.ok||!response.body||Number(response.headers.get('content-length')||0)>limit)throw Error('기존 PDF 다운로드에 실패해 추가 첨부를 중단했습니다.');
   const reader=response.body.getReader(),parts=[];let length=0;
   try{while(true){const {done,value}=await reader.read();if(done)break;length+=value.length;if(length>limit){await reader.cancel();throw Error('기존 PDF 확인 용량을 초과해 추가 첨부를 중단했습니다.');}parts.push(Buffer.from(value));}}finally{reader.releaseLock();}
-  if(createHash('sha256').update(Buffer.concat(parts)).digest('hex')===HASH){policyIds.add(a.id);keepableIds.add(a.id);}
+  const digest=createHash('sha256').update(Buffer.concat(parts)).digest('hex');
+  if(digest===HASH){policyIds.add(a.id);keepableIds.add(a.id);}
+  else if(digest===LEGACY_HASH)policyIds.add(a.id);
  }
  return {policyIds,keepableIds};
 }
@@ -81,3 +81,4 @@ async function update(client,load,fetchImpl){
  if(actual.id!==TEAM_TERMS_MESSAGE_ID||pdfs.length!==1||!verified.keepableIds.has(pdfs[0].id))throw Error('수정 후 PDF 1개 여부를 확인하지 못했습니다. 재첨부하지 않고 중단합니다.');
  return {updated:true,messageId:message.id,pdfAttached:true};
 }
+
