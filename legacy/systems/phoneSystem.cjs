@@ -56,26 +56,23 @@ function loadUserInfo() {
         }
         return data;
     } catch (error) {
-        console.error(
-            '[전화번호] userInfo.json 읽기 실패:',
-            error
-        );
-        return {
-            users: {}
-        };
+        console.error('[전화번호] 기존 비공개 정보 파일 읽기 실패');
+        throw new Error('전화번호 비공개 저장 파일을 확인하세요.');
     }
 }
 function saveUserInfo(data) {
     try {
+        fs.mkdirSync(path.dirname(USER_INFO_FILE), {recursive: true});
         fs.writeFileSync(
-            USER_INFO_FILE,
+            USER_INFO_FILE + '.tmp',
             JSON.stringify(
                 data,
                 null,
                 4
             ),
-            'utf8'
+            {encoding: 'utf8', mode: 0o600}
         );
+        fs.renameSync(USER_INFO_FILE + '.tmp', USER_INFO_FILE);
         return true;
     } catch (error) {
         console.error(
@@ -246,6 +243,7 @@ async function handlePhoneButton(
 async function handlePhoneModal(
     interaction
 ) {
+    await interaction.deferReply({flags: 64});
     const input =
         interaction.fields.getTextInputValue(
             'phone'
@@ -257,17 +255,20 @@ async function handlePhoneModal(
     if (
         !phone
     ) {
-        await interaction.reply({
+        await interaction.editReply({
             content:
                 '❌ 올바른 전화번호를 입력해주세요.\n\n' +
                 '예시: `010-1234-5678`',
-            ephemeral:
-                true
+
         });
         return;
     }
-    const data =
-        loadUserInfo();
+    let data;
+    try { data = loadUserInfo(); }
+    catch {
+        await interaction.editReply({content: '❌ 기존 개인정보 파일을 읽지 못해 저장을 중단했습니다. 관리자에게 알려주세요.'});
+        return;
+    }
     if (
         !data.users[
             interaction.user.id
@@ -292,21 +293,24 @@ async function handlePhoneModal(
     if (
         !saved
     ) {
-        await interaction.reply({
+        await interaction.editReply({
             content:
                 '❌ 전화번호 저장 중 오류가 발생했습니다.',
-            ephemeral:
-                true
+
         });
         return;
     }
     console.log('[전화번호] 비공개 정보 저장 완료');
-    await interaction.reply({
+    let roleSynced = true;
+    if (interaction.guildId === '1492461447568162876' && interaction.client?.__syncPremierMembership) {
+        try { roleSynced = await interaction.client.__syncPremierMembership(interaction.user.id); }
+        catch { roleSynced = false; }
+    }
+    await interaction.editReply({
         content:
             `✅ 전화번호가 등록되었습니다.\n\n` +
-            `> ${phone}`,
-        ephemeral:
-            true
+            `> ${phone}` + (roleSynced ? '' : '\n역할 반영은 잠시 후 자동으로 재시도됩니다.'),
+
     });
 }
 async function startPhoneSystem(

@@ -30,9 +30,14 @@ function startAutoRoleSystem(client) {
                     );
                     return;
                 }
+                const autoRoleIds = [...AUTO_ROLE_IDS];
+                if (member.guild.id === '1492461447568162876' && client.__ensurePremierPhoneRoles) {
+                    const phoneRoles = await client.__ensurePremierPhoneRoles(member.guild);
+                    autoRoleIds.push(phoneRoles.missing);
+                }
                 for (
                     const roleId
-                    of AUTO_ROLE_IDS
+                    of autoRoleIds
                 ) {
                     const role =
                         member.guild.roles.cache.get(
@@ -69,6 +74,9 @@ function startAutoRoleSystem(client) {
                     console.log(
                         `[자동 역할] ${member.user.tag} → ${role.name}`
                     );
+                }
+                if (member.guild.id === '1492461447568162876' && client.__syncPremierMembership) {
+                    await client.__syncPremierMembership(member.id);
                 }
             } catch (error) {
                 console.error(

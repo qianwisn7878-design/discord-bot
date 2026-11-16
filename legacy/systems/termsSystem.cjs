@@ -173,6 +173,9 @@ async function updateAllTermsRole(member) {
 }
 async function agreeTerms(member) {
     try {
+        if (member.guild.id === '1492461447568162876' && member.client?.__setPremierConsent) {
+            member.client.__setPremierConsent(member.id, 'terms', true, member);
+        }
         console.log(
             `[약관] ${member.user.tag} → 이용약관 동의 처리`
         );
@@ -188,6 +191,9 @@ async function agreeTerms(member) {
         await updateAllTermsRole(
             member
         );
+        if (member.guild.id === '1492461447568162876' && member.client?.__syncPremierMembership) {
+            await member.client.__syncPremierMembership(member.id);
+        }
         try {
             await member.send({
                 content:
@@ -212,6 +218,9 @@ async function agreeTerms(member) {
 }
 async function disagreeTerms(member) {
     try {
+        if (member.guild.id === '1492461447568162876' && member.client?.__setPremierConsent) {
+            member.client.__setPremierConsent(member.id, 'terms', false, member);
+        }
         console.log(
             `[약관] ${member.user.tag} → 이용약관 동의 취소`
         );
@@ -227,6 +236,9 @@ async function disagreeTerms(member) {
         await updateAllTermsRole(
             member
         );
+        if (member.guild.id === '1492461447568162876' && member.client?.__syncPremierMembership) {
+            await member.client.__syncPremierMembership(member.id);
+        }
     } catch (error) {
         console.error(
             `[약관] ${member.user.tag} 이용약관 동의 취소 실패:`,
@@ -236,6 +248,9 @@ async function disagreeTerms(member) {
 }
 async function agreePrivacy(member) {
     try {
+        if (member.guild.id === '1492461447568162876' && member.client?.__setPremierConsent) {
+            member.client.__setPremierConsent(member.id, 'privacy', true, member);
+        }
         console.log(
             `[약관] ${member.user.tag} → 개인정보 수집 및 이용 동의 처리`
         );
@@ -251,6 +266,9 @@ async function agreePrivacy(member) {
         await updateAllTermsRole(
             member
         );
+        if (member.guild.id === '1492461447568162876' && member.client?.__syncPremierMembership) {
+            await member.client.__syncPremierMembership(member.id);
+        }
         try {
             await member.send({
                 content:
@@ -275,6 +293,9 @@ async function agreePrivacy(member) {
 }
 async function disagreePrivacy(member) {
     try {
+        if (member.guild.id === '1492461447568162876' && member.client?.__setPremierConsent) {
+            member.client.__setPremierConsent(member.id, 'privacy', false, member);
+        }
         console.log(
             `[약관] ${member.user.tag} → 개인정보 동의 취소`
         );
@@ -290,6 +311,9 @@ async function disagreePrivacy(member) {
         await updateAllTermsRole(
             member
         );
+        if (member.guild.id === '1492461447568162876' && member.client?.__syncPremierMembership) {
+            await member.client.__syncPremierMembership(member.id);
+        }
     } catch (error) {
         console.error(
             `[약관] ${member.user.tag} 개인정보 동의 취소 실패:`,
