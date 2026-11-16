@@ -131,7 +131,7 @@ async function syncTeamScrimPanelsNow(client,data){
   }
   const items=data.items||[],active=items.filter(item=>['open','confirmed','playing'].includes(item.status));
   const payloads={
-   guide:{embeds:[{...embed('프리미어 팀 스크림 이용 안내','1. **상대 구하기**에서 한국 시간 일정·맵·모집 내용을 입력하세요.\n2. **스크림-모집**의 개별 모집글에서 **맞짱 까기**를 누르면 내 팀이 바로 상대 팀으로 확정됩니다.\n3. 참여 취소·모집 취소·경기 종료도 같은 메뉴에서 할 수 있습니다.\n\n맵 지정 모집 / 모집 후 맵 선택 / 밴픽으로 결정 중 선택할 수 있습니다.\n\n`/스크림` 명령으로도 열 수 있습니다. 일정은 **01월 01일 00:20** 형식의 한국 시간(UTC+9)으로 입력합니다. 연도는 다가오는 날짜로 자동 적용되며 180일 이내 일정만 등록할 수 있습니다.'),footer:{text:'ETG 팀 스크림 · guide'}}],components:[row([btn('상대 구하기','create',1),btn('모집 목록','list:0'),link])]},
+   guide:{embeds:[{...embed('프리미어 팀 스크림 이용 안내','1. **상대 구하기**에서 한국 시간 일정·맵·모집 내용을 입력하세요.\n2. **스크림-모집**의 개별 모집글에서 **맞짱 까기**를 누르면 내 팀이 바로 상대 팀으로 확정됩니다.\n3. 참여 취소·모집 취소도 같은 메뉴에서 할 수 있습니다. 대진 확정 후 밴픽·경기 시작·전적·종료는 내전봇의 `/스크림진행` 또는 홈페이지에서 진행하세요.\n\n맵 지정 모집 / 모집 후 맵 선택 / 밴픽으로 결정 중 선택할 수 있습니다.\n\n`/스크림` 명령으로도 열 수 있습니다. 일정은 **01월 01일 00:20** 형식의 한국 시간(UTC+9)으로 입력합니다. 연도는 다가오는 날짜로 자동 적용되며 180일 이내 일정만 등록할 수 있습니다.'),footer:{text:'ETG 팀 스크림 · guide'}}],components:[row([btn('상대 구하기','create',1),btn('모집 목록','list:0'),link])]},
    board:{content:'**스크림 모집**\n각 모집글의 **맞짱 까기** 버튼을 누르면 소속 팀으로 바로 대진이 확정됩니다.',embeds:[{footer:{text:'ETG 팀 스크림 · board'},description:'아래에서 모집글을 확인하세요.'}],components:[row([btn('+ 상대 구하기','create'),link])]}
   };
   for(const key of ['guide','board']){
