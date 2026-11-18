@@ -11,6 +11,11 @@ const normalize=name=>String(name).normalize('NFKC').replace(/[^\p{L}\p{N}]/gu,'
 function readState(){try{return JSON.parse(fs.readFileSync(FILE,'utf8'));}catch(e){if(e.code==='ENOENT')return {};throw e;}}
 function writeState(state){fs.mkdirSync(new URL('./legacy/data/',import.meta.url),{recursive:true});fs.writeFileSync(new URL('./legacy/data/community-layout.json.tmp',import.meta.url),JSON.stringify(state),{mode:0o600});fs.renameSync(new URL('./legacy/data/community-layout.json.tmp',import.meta.url),FILE);}
 export async function ensureCommunityLayout(rest,botId,{read=readState,write=writeState}={}){
+ const rolesPath='/guilds/'+COMMUNITY_LAYOUT_GUILD+'/roles';
+ const roles=await rest.get(rolesPath);
+ if(!roles.some(role=>!role.managed&&role.name==='인사 담당')){
+  await rest.post(rolesPath,{body:{name:'인사 담당',permissions:'0',mentionable:false}});
+ }
  const state=read();if(state.complete)return {skipped:true};state.created??={};
  const channels=await rest.get('/guilds/'+COMMUNITY_LAYOUT_GUILD+'/channels');
  for(const group of GROUPS){
