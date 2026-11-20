@@ -455,6 +455,8 @@ const COMMUNITY_TERMS_CONTENT='[ 필수 ] 이용약관 동의\n\n이용약관에
 const COMMUNITY_TERMS={guild:'1554439098490429442',channel:'1556927431502340150',agreed:'1566006162112122942',pending:'1565936804811776180'};
 let communityTermsMessageId=null,communityTermsSetup=null;
 const communityTermsQueues=new Map();
+let communityTermsRefresh=null;
+let communityReactionsChanged=null;
 async function ensureCommunityTermsMessage(client){
  if(communityTermsSetup)return communityTermsSetup;
  communityTermsSetup=(async()=>{
@@ -491,6 +493,7 @@ function queueCommunityConsent(key,task){
 }
 async function communityTermsReaction(client,reaction,user,agreed){
  if(user.bot||reaction.message.channelId!==COMMUNITY_TERMS.channel||!isCheckEmoji(reaction))return;
+ communityReactionsChanged?.add(user.id);
  return queueCommunityConsent(user.id,async()=>{
   if(reaction.partial)await reaction.fetch();
   if(reaction.message.partial)await reaction.message.fetch();
@@ -507,7 +510,42 @@ function startCommunityTermsSystem(client){
  (client.__termsOn||client.on).call(client,Events.MessageReactionAdd,(reaction,user)=>{communityTermsReaction(client,reaction,user,true).catch(e=>console.error('[커뮤니티 약관]',e.message));});
  (client.__termsOn||client.on).call(client,Events.MessageReactionRemove,(reaction,user)=>{communityTermsReaction(client,reaction,user,false).catch(e=>console.error('[커뮤니티 약관]',e.message));});
  (client.__termsOn||client.on).call(client,Events.GuildMemberAdd,member=>{if(member.user.bot||member.guild.id!==COMMUNITY_TERMS.guild)return;queueCommunityConsent(member.id,()=>setCommunityConsent(member,false));});
- const refresh=()=>ensureCommunityTermsMessage(client).catch(e=>console.error('[커뮤니티 약관] 안내 생성 실패:',e.message));
+ const refresh=()=>{
+  if(communityTermsRefresh)return communityTermsRefresh;
+  const changed=new Set();
+  communityReactionsChanged=changed;
+  communityTermsRefresh=(async()=>{
+   const message=await ensureCommunityTermsMessage(client);
+   if(message.author.id!==client.user.id)return;
+   const route='/channels/'+COMMUNITY_TERMS.channel+'/messages/'+message.id+'/reactions/'+encodeURIComponent(CHECK_EMOJI);
+   let after;
+   while(true){
+    const query=new URLSearchParams({limit:'100'});
+    if(after)query.set('after',after);
+    const users=await client.rest.get(route,{query});
+    for(const user of users){
+     if(user.bot||changed.has(user.id))continue;
+     await queueCommunityConsent(user.id,async()=>{
+      if(changed.has(user.id))return;
+      let member;
+      try{member=await message.guild.members.fetch({user:user.id,force:true});}
+      catch(error){if(error.code===10007)return;throw error;}
+      if(changed.has(user.id)||member.roles.cache.has(COMMUNITY_TERMS.agreed)&&!member.roles.cache.has(COMMUNITY_TERMS.pending))return;
+      if(!member.roles.cache.has(COMMUNITY_TERMS.agreed))await member.roles.add(COMMUNITY_TERMS.agreed,'커뮤니티 약관 체크 반응 복구');
+      if(member.roles.cache.has(COMMUNITY_TERMS.pending))await member.roles.remove(COMMUNITY_TERMS.pending,'커뮤니티 약관 체크 반응 복구');
+     }).catch(()=>{});
+    }
+    if(users.length<100)break;
+    const next=users.at(-1).id;
+    if(next===after)throw Error('약관 반응 페이지가 반복되었습니다.');
+    after=next;
+   }
+  })().catch(e=>console.error('[커뮤니티 약관] 확인 실패:',e.message)).finally(()=>{
+   communityReactionsChanged=null;
+   communityTermsRefresh=null;
+  });
+  return communityTermsRefresh;
+ };
  refresh();const timer=setInterval(refresh,300000);timer.unref?.();
 }
 
